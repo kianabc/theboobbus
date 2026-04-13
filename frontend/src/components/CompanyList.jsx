@@ -75,15 +75,18 @@ export default function CompanyList({ onSelect, onAdd }) {
                 <span className="badge badge-industry">{c.industry}</span>
                 <span className="card-city">{c.city}</span>
               </div>
+              {c.description && (
+                <p className="card-desc">{c.description}</p>
+              )}
               {c.website && (
                 <a
-                  href={c.website}
+                  href={c.website.startsWith("http") ? c.website : `https://${c.website}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="card-url"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  {new URL(c.website).hostname}
+                  {c.website.replace(/^https?:\/\//, "").replace(/^www\./, "")}
                 </a>
               )}
             </div>

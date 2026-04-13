@@ -144,6 +144,9 @@ export default function CompanyDetail({ companyId, onBack }) {
                 </a>
               )}
             </div>
+            {company.description && (
+              <p className="detail-desc">{company.description}</p>
+            )}
           </>
         )}
       </div>

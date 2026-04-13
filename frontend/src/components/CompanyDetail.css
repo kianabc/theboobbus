@@ -87,6 +87,13 @@
   text-decoration: underline;
 }
 
+.detail-desc {
+  margin-top: 10px;
+  font-size: 14px;
+  color: var(--gray-600);
+  line-height: 1.5;
+}
+
 .scrape-section {
   display: flex;
   align-items: center;

@@ -54,6 +54,7 @@ class CompanyOut(BaseModel):
     website: str | None
     industry: str | None
     city: str | None
+    description: str | None = None
     email_count: int = 0
 
 
@@ -90,7 +91,7 @@ def list_companies(
 ):
     """List all companies, optionally filtered by name or industry."""
     query = """
-        SELECT c.id, c.name, c.website, c.industry, c.city, COUNT(e.id) as email_count
+        SELECT c.id, c.name, c.website, c.industry, c.city, c.description, COUNT(e.id) as email_count
         FROM companies c
         LEFT JOIN hr_emails e ON e.company_id = c.id
         WHERE 1=1
@@ -104,17 +105,17 @@ def list_companies(
         params.append(f"%{industry}%")
     query += " GROUP BY c.id ORDER BY c.name"
     rs = execute(query, params)
-    return [{"id": r[0], "name": r[1], "website": r[2], "industry": r[3], "city": r[4], "email_count": r[5]} for r in rs.rows]
+    return [{"id": r[0], "name": r[1], "website": r[2], "industry": r[3], "city": r[4], "description": r[5], "email_count": r[6]} for r in rs.rows]
 
 
 @app.get("/api/companies/{company_id}", response_model=CompanyWithEmails)
 def get_company(company_id: int):
     """Get a company and its cached HR emails."""
-    rs = execute("SELECT id, name, website, industry, city FROM companies WHERE id = ?", [company_id])
+    rs = execute("SELECT id, name, website, industry, city, description FROM companies WHERE id = ?", [company_id])
     if not rs.rows:
         raise HTTPException(status_code=404, detail="Company not found")
     r = rs.rows[0]
-    company = {"id": r[0], "name": r[1], "website": r[2], "industry": r[3], "city": r[4]}
+    company = {"id": r[0], "name": r[1], "website": r[2], "industry": r[3], "city": r[4], "description": r[5]}
 
     ers = execute(
         "SELECT id, email, confidence, source FROM hr_emails WHERE company_id = ? ORDER BY confidence DESC",
