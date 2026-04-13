@@ -12,6 +12,20 @@ import "./App.css";
 const DORIS_PHOTOS = Array.from({ length: 9 }, (_, i) => `/doris/doris-${i + 1}.png`)
   .sort(() => Math.random() - 0.5);
 
+const TAGLINES = [
+  "Driving breast health to every Utah workplace, one parking lot at a time",
+  "Your AI wingman for booking mammography visits across Utah",
+  "Because saving lives shouldn't require a doctor's appointment",
+  "Bringing the screenings to the people, so the people don't have to go anywhere",
+  "20 minutes, zero hassle, one awesome pink bus",
+  "The fastest way to get a mammography bus in your parking lot",
+  "Making 'we care about our employees' more than just a poster in the break room",
+  "Your outreach co-pilot for the coolest bus in Utah",
+  "Connecting companies with life-saving screenings, powered by AI and a really cool bus",
+  "Because every parking lot deserves a visit from the most important bus in Utah",
+];
+const TAGLINE = TAGLINES[Math.floor(Math.random() * TAGLINES.length)];
+
 function LoginPage() {
   const { gsiReady, renderGoogleButton } = useAuth();
   const btnRef = useRef(null);
@@ -34,7 +48,7 @@ function LoginPage() {
           <img src="/logo.png" alt="Boob Bus" className="login-logo" />
           <h1>The Boob Bus Co-Pilot</h1>
           <p className="login-subtitle">
-            Lead generation & outreach for mobile mammography bookings
+            {TAGLINE}
           </p>
           <div className="login-btn-wrapper">
             <div ref={btnRef} />
@@ -109,7 +123,7 @@ function App() {
         <div className="header-text">
           <h1 onClick={goBack}>The Boob Bus Co-Pilot</h1>
           <p className="subtitle">
-            Find HR contacts & book mobile mammography visits for Utah companies
+            {TAGLINE}
           </p>
         </div>
         <div className="header-user">
