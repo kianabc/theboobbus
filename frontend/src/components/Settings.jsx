@@ -227,6 +227,20 @@ export default function Settings({ onBack }) {
         </div>
       </div>
 
+      {/* ── Email Signature ── */}
+      <div className="settings-card">
+        <h2>Email Signature</h2>
+        <p className="settings-desc">
+          Appended to every AI-generated email. Use <code>{"{sender_name}"}</code> for the logged-in user's name.
+        </p>
+        <textarea
+          className="signature-input"
+          value={settings.email_signature}
+          onChange={(e) => update("email_signature", e.target.value)}
+          rows={5}
+        />
+      </div>
+
       {/* ── Gmail Connection for Auto Follow-ups ── */}
       <div className="settings-card">
         <h2>Gmail Connection</h2>

@@ -271,14 +271,14 @@ CRITICAL RULES:
 - NEVER make up statistics, dollar amounts, quotes, stories, or testimonials. Only use facts explicitly provided above.
 - NEVER mention "special rates", "discounts", or "limited time offers" unless explicitly stated in the info above.
 - NEVER use em-dashes or en-dashes (-- or the unicode characters). Use commas, periods, or "and" instead.
-- NEVER sign off as "[Your name]" or "[Your Name]". Use the sender name provided in the prompt.
+- NEVER sign off as "[Your name]" or "[Your Name]". Do NOT include a sign-off or signature at the end of the email. The signature will be appended automatically.
 - Keep punctuation simple and clean.
 - Most customers pay nothing out of pocket because insurance covers the screening. Mention this.
 
 Return ONLY the email in this exact format:
 Subject: [subject line here]
 
-[email body here]
+[email body here, ending with the last sentence of the message. Do NOT add a sign-off, name, or signature.]
 
 Do not include any other text, explanation, or commentary.""",
         messages=[{"role": "user", "content": prompt}],
@@ -301,5 +301,10 @@ Do not include any other text, explanation, or commentary.""",
     # Clean dashes from subject too
     subject = subject.replace("\u2014", ", ").replace("\u2013", "-")
     body = body.replace("\u2014", ", ").replace("\u2013", "-")
+
+    # Append email signature
+    sig_template = _get_db_setting("email_signature", "{sender_name}\nThe Boob Bus\nhttps://theboobbus.com\n(866) 747-BOOB")
+    sig = sig_template.replace("{sender_name}", sender_name or "The Boob Bus Team")
+    body = body.rstrip() + "\n\n" + sig
 
     return {"subject": subject, "body": body}

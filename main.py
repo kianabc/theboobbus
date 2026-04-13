@@ -592,6 +592,7 @@ class SettingsUpdate(BaseModel):
     scraping_enabled: bool | None = None
     anthropic_api_key: str | None = None
     test_interval_seconds: int | None = None
+    email_signature: str | None = None
 
 
 def _get_setting(key: str, default: str = "") -> str:
@@ -621,6 +622,7 @@ def get_settings():
         "scraping_enabled": _get_setting("scraping_enabled", "true") == "true",
         "anthropic_api_key": _get_setting("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY", ""),
         "test_interval_seconds": int(_get_setting("test_interval_seconds", "60")),
+        "email_signature": _get_setting("email_signature", "{sender_name}\nThe Boob Bus\nhttps://theboobbus.com\n(866) 747-BOOB"),
     }
 
 
@@ -650,6 +652,8 @@ def update_settings(body: SettingsUpdate):
         _set_setting("anthropic_api_key", body.anthropic_api_key)
     if body.test_interval_seconds is not None:
         _set_setting("test_interval_seconds", str(body.test_interval_seconds))
+    if body.email_signature is not None:
+        _set_setting("email_signature", body.email_signature)
     return get_settings()
 
 
