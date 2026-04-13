@@ -220,20 +220,9 @@ def search_apollo(company_name: str, website: str) -> list[dict]:
                 confidence = "high" if is_strong_hr else ("medium" if is_weak_hr else "low")
                 source = f"Apollo.io - {name_display}, {title}"
                 results.append({"email": email, "confidence": confidence, "source": source})
-            elif first_name and domain:
-                # Free tier: no email, but we know the person exists.
-                # Try first@ pattern (safest guess with just a first name)
-                guesses = [
-                    f"{first_name.lower()}@{domain}",
-                ]
-                # Only add firstl@ if last_name_hint is a clean single letter (not obfuscated)
-                if last_name_hint and len(last_name_hint) == 1 and last_name_hint.isalpha():
-                    guesses.append(f"{first_name.lower()}{last_name_hint.lower()}@{domain}")
-
-                for guess in guesses:
-                    confidence = "medium" if is_strong_hr else "low"
-                    source = f"Apollo.io (guessed) - {name_display}, {title}"
-                    results.append({"email": guess, "confidence": confidence, "source": source})
+            # Free tier: no email available.
+            # Don't guess — guessed emails are unreliable and pollute the contact list.
+            # The person's name/title will show up in Hunter.io results if Hunter finds them.
 
     except Exception as e:
         logger.error("Apollo.io error for %s: %s", company_name, e)
