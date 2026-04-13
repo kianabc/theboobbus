@@ -60,7 +60,7 @@
 .header-logo {
   height: 40px;
   cursor: pointer;
-  filter: brightness(0) invert(1);
+  border-radius: 6px;
 }
 
 .header-text {
