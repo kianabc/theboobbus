@@ -64,6 +64,7 @@ export default function EmailComposer({ companyId, contact, onSent }) {
                 subject,
                 body,
                 company_id: companyId,
+                email_type: emailType,
               },
               tokenResponse.access_token
             );

@@ -240,6 +240,7 @@ class SendEmailRequest(BaseModel):
     subject: str
     body: str
     company_id: int | None = None
+    email_type: str = "initial"
 
 
 @app.post("/api/generate-email")
@@ -299,26 +300,96 @@ def send_email(body: SendEmailRequest, request: Request):
         logger.error("Gmail send error: %s %s", resp.status_code, resp.text)
         raise HTTPException(status_code=resp.status_code, detail=f"Gmail error: {resp.json().get('error', {}).get('message', 'Unknown')}")
 
-    # Log the sent email
+    # Log the sent email with follow-up scheduling
+    gmail_msg_id = resp.json().get("id", "")
+    user_email = get_current_user(request).get("email", "unknown")
+
+    from followup_engine import get_follow_up_days
+    from datetime import datetime, timedelta, timezone
+    follow_up_days = get_follow_up_days()
+    email_type = getattr(body, "email_type", "initial") or "initial"
+    next_follow_up = None
+    if email_type != "final":
+        next_follow_up = (datetime.now(timezone.utc) + timedelta(days=follow_up_days)).isoformat()
+
     if body.company_id:
         execute(
-            """INSERT INTO sent_emails (company_id, to_email, subject, body, sent_by)
-               VALUES (?, ?, ?, ?, ?)""",
+            """INSERT INTO sent_emails
+               (company_id, to_email, subject, body, sent_by, email_type, gmail_message_id, next_follow_up_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             [body.company_id, body.to, body.subject, body.body,
-             get_current_user(request).get("email", "unknown")],
+             user_email, email_type, gmail_msg_id, next_follow_up],
         )
 
-    return {"status": "sent", "message_id": resp.json().get("id")}
+    # Store the Gmail refresh token if provided (for auto follow-ups)
+    gmail_refresh = request.headers.get("X-Gmail-Refresh-Token", "")
+    if gmail_refresh and user_email != "unknown":
+        execute(
+            """INSERT INTO gmail_tokens (user_email, refresh_token)
+               VALUES (?, ?)
+               ON CONFLICT(user_email) DO UPDATE SET refresh_token = excluded.refresh_token, updated_at = CURRENT_TIMESTAMP""",
+            [user_email, gmail_refresh],
+        )
+
+    return {"status": "sent", "message_id": gmail_msg_id}
 
 
 @app.get("/api/companies/{company_id}/outreach")
 def get_outreach_history(company_id: int):
     """Get sent email history for a company."""
     rs = execute(
-        "SELECT id, to_email, subject, sent_by, sent_at FROM sent_emails WHERE company_id = ? ORDER BY sent_at DESC",
+        """SELECT id, to_email, subject, sent_by, email_type, replied, sent_at, next_follow_up_at
+           FROM sent_emails WHERE company_id = ? ORDER BY sent_at DESC""",
         [company_id],
     )
-    return [{"id": r[0], "to_email": r[1], "subject": r[2], "sent_by": r[3], "sent_at": r[4]} for r in rs.rows]
+    return [{
+        "id": r[0], "to_email": r[1], "subject": r[2], "sent_by": r[3],
+        "email_type": r[4], "replied": bool(r[5]), "sent_at": r[6],
+        "next_follow_up_at": r[7],
+    } for r in rs.rows]
+
+
+# ── Settings ──────────────────────────────────────────────────────────────────
+
+class SettingsUpdate(BaseModel):
+    follow_up_days: int
+
+
+@app.get("/api/settings")
+def get_settings():
+    """Get app settings."""
+    from followup_engine import get_follow_up_days
+    return {"follow_up_days": get_follow_up_days()}
+
+
+@app.put("/api/settings")
+def update_settings(body: SettingsUpdate):
+    """Update app settings."""
+    from followup_engine import set_follow_up_days
+    if body.follow_up_days < 1 or body.follow_up_days > 30:
+        raise HTTPException(status_code=400, detail="Follow-up days must be between 1 and 30")
+    set_follow_up_days(body.follow_up_days)
+    return {"follow_up_days": body.follow_up_days}
+
+
+# ── Cron: Auto Follow-ups ────────────────────────────────────────────────────
+
+@app.post("/api/cron/follow-ups", dependencies=[])
+def run_follow_ups(request: Request):
+    """Cron endpoint: check for replies and send follow-ups.
+
+    Protected by a secret token instead of user auth.
+    """
+    cron_secret = os.environ.get("CRON_SECRET", "").strip()
+    auth_header = request.headers.get("Authorization", "")
+    provided = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else ""
+    if cron_secret and provided != cron_secret:
+        raise HTTPException(status_code=403, detail="Invalid cron secret")
+
+    from followup_engine import process_pending_followups
+    result = process_pending_followups()
+    logger.info("Follow-up cron: %s", result)
+    return result
 
 
 if __name__ == "__main__":

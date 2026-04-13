@@ -142,3 +142,9 @@
   padding: 0 12px 12px !important;
   border-bottom: 2px solid var(--gray-200) !important;
 }
+
+.badge-type {
+  background: #f0f0ff;
+  color: #6366f1;
+  text-transform: capitalize;
+}

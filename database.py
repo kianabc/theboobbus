@@ -57,8 +57,21 @@ def init_db():
                 subject TEXT,
                 body TEXT,
                 sent_by TEXT,
+                email_type TEXT DEFAULT 'initial',
+                gmail_message_id TEXT,
+                replied INTEGER DEFAULT 0,
                 sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                next_follow_up_at TIMESTAMP,
                 FOREIGN KEY (company_id) REFERENCES companies(id)
+            )""",
+            """CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )""",
+            """CREATE TABLE IF NOT EXISTS gmail_tokens (
+                user_email TEXT PRIMARY KEY,
+                refresh_token TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
         ])
     finally:

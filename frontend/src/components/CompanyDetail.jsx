@@ -147,7 +147,8 @@ export default function CompanyDetail({ companyId, onBack }) {
               <tr>
                 <th>To</th>
                 <th>Subject</th>
-                <th>Sent By</th>
+                <th>Type</th>
+                <th>Status</th>
                 <th>Date</th>
               </tr>
             </thead>
@@ -156,7 +157,20 @@ export default function CompanyDetail({ companyId, onBack }) {
                 <tr key={o.id}>
                   <td>{o.to_email}</td>
                   <td>{o.subject}</td>
-                  <td>{o.sent_by}</td>
+                  <td>
+                    <span className="badge badge-type">{o.email_type}</span>
+                  </td>
+                  <td>
+                    {o.replied ? (
+                      <span className="badge badge-high">Replied</span>
+                    ) : o.next_follow_up_at ? (
+                      <span className="badge badge-medium" title={`Follow-up on ${new Date(o.next_follow_up_at).toLocaleDateString()}`}>
+                        Pending
+                      </span>
+                    ) : (
+                      <span className="badge badge-low">Done</span>
+                    )}
+                  </td>
                   <td className="source-cell">
                     {new Date(o.sent_at).toLocaleDateString()}
                   </td>

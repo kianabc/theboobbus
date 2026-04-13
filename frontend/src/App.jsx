@@ -3,6 +3,7 @@ import { useAuth } from "./AuthContext";
 import CompanyList from "./components/CompanyList";
 import CompanyDetail from "./components/CompanyDetail";
 import AddCompany from "./components/AddCompany";
+import Settings from "./components/Settings";
 import "./App.css";
 
 function LoginPage() {
@@ -76,6 +77,13 @@ function App() {
           </p>
         </div>
         <div className="header-user">
+          <button
+            className="btn btn-settings"
+            onClick={() => setView("settings")}
+            title="Settings"
+          >
+            Settings
+          </button>
           {user.picture && (
             <img src={user.picture} alt="" className="user-avatar" />
           )}
@@ -94,6 +102,7 @@ function App() {
           <CompanyDetail companyId={selectedCompanyId} onBack={goBack} />
         )}
         {view === "add" && <AddCompany onBack={goBack} />}
+        {view === "settings" && <Settings onBack={goBack} />}
       </main>
     </div>
   );

@@ -3,5 +3,11 @@
   "outputDirectory": "frontend/dist",
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/index.py" }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/follow-ups",
+      "schedule": "0 14 * * *"
+    }
   ]
 }
