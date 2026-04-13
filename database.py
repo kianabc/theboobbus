@@ -1,13 +1,11 @@
 import libsql_client
 import os
 
-TURSO_URL = os.environ.get("TURSO_DATABASE_URL", "").strip()
-TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN", "").strip()
-
-
 def _get_client():
-    if TURSO_URL:
-        return libsql_client.create_client_sync(url=TURSO_URL, auth_token=TURSO_TOKEN)
+    url = os.environ.get("TURSO_DATABASE_URL", "").strip()
+    token = os.environ.get("TURSO_AUTH_TOKEN", "").strip()
+    if url:
+        return libsql_client.create_client_sync(url=url, auth_token=token)
     return libsql_client.create_client_sync(url="file:hr_emails.db")
 
 

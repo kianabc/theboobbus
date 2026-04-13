@@ -1,5 +1,8 @@
 """HR Email Finder API — Find HR department emails for top Utah companies."""
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -11,6 +14,7 @@ from pydantic import BaseModel
 from database import init_db, execute
 from seed_data import seed_companies
 from scraper import scrape_company
+from email_finders import find_hr_emails
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -127,18 +131,19 @@ def add_company(body: CompanyCreate):
 
 @app.post("/api/companies/{company_id}/scrape", response_model=list[HREmailOut])
 def scrape_company_emails(company_id: int):
-    """Scrape a company's website for HR emails and cache the results."""
+    """Find HR emails using Hunter.io, Apollo.io, and web scraping."""
     rs = execute("SELECT id, name, website FROM companies WHERE id = ?", [company_id])
     if not rs.rows:
         raise HTTPException(status_code=404, detail="Company not found")
 
     row = rs.rows[0]
+    company_name = row[1]
     website = row[2]
     if not website:
-        raise HTTPException(status_code=400, detail="Company has no website URL to scrape")
+        raise HTTPException(status_code=400, detail="Company has no website URL to search")
 
-    logger.info("Scraping %s (%s)", row[1], website)
-    found_emails = scrape_company(website)
+    logger.info("Finding HR emails for %s (%s)", company_name, website)
+    found_emails = find_hr_emails(company_name, website)
 
     for item in found_emails:
         execute(
