@@ -15,18 +15,20 @@ export default function CompanyList({ onSelect, onAdd }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchIndustries().then(setIndustries);
-    fetchCities().then(setCities);
-    fetchCounties().then(setCounties);
+    fetchIndustries().then(setIndustries).catch(() => {});
+    fetchCities().then(setCities).catch(() => {});
+    fetchCounties().then(setCounties).catch(() => {});
   }, []);
 
   useEffect(() => {
     setLoading(true);
     const timeout = setTimeout(() => {
-      fetchCompanies(search, industry, city, county).then((data) => {
-        setCompanies(data);
-        setLoading(false);
-      });
+      fetchCompanies(search, industry, city, county)
+        .then((data) => {
+          setCompanies(Array.isArray(data) ? data : []);
+          setLoading(false);
+        })
+        .catch(() => setLoading(false));
     }, 200);
     return () => clearTimeout(timeout);
   }, [search, industry, city, county]);

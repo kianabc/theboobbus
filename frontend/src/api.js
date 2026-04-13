@@ -7,12 +7,14 @@ function authHeaders() {
   return headers;
 }
 
+let reloading = false;
 async function authFetch(url, options = {}) {
   const res = await fetch(url, {
     ...options,
     headers: { ...authHeaders(), ...options.headers },
   });
-  if (res.status === 401) {
+  if (res.status === 401 && !reloading) {
+    reloading = true;
     localStorage.removeItem("google_token");
     window.location.reload();
     throw new Error("Unauthorized");
@@ -21,13 +23,19 @@ async function authFetch(url, options = {}) {
 }
 
 export async function fetchCities() {
-  const res = await authFetch(`${API}/api/cities`);
-  return res.json();
+  try {
+    const res = await authFetch(`${API}/api/cities`);
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch { return []; }
 }
 
 export async function fetchCounties() {
-  const res = await authFetch(`${API}/api/counties`);
-  return res.json();
+  try {
+    const res = await authFetch(`${API}/api/counties`);
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch { return []; }
 }
 
 export async function fetchCompanies(search = "", industry = "", city = "", county = "") {
