@@ -135,6 +135,18 @@ export default function CompanyDetail({ companyId, onBack }) {
 
   const contactedEmails = new Set(outreach.map((o) => o.to_email));
 
+  // Sort contacts: Hunter > Apollo > Manual > Web scraping, then by confidence
+  const SOURCE_ORDER = { "Hunter": 0, "Apollo": 1, "Manual": 2 };
+  const sortedContacts = [...(company.hr_emails || [])].sort((a, b) => {
+    const aSource = Object.keys(SOURCE_ORDER).find(k => (a.source || "").startsWith(k));
+    const bSource = Object.keys(SOURCE_ORDER).find(k => (b.source || "").startsWith(k));
+    const aOrder = aSource ? SOURCE_ORDER[aSource] : 3;
+    const bOrder = bSource ? SOURCE_ORDER[bSource] : 3;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    const confOrder = { high: 0, medium: 1, low: 2 };
+    return (confOrder[a.confidence] || 3) - (confOrder[b.confidence] || 3);
+  });
+
   return (
     <div className="company-detail">
       <button className="btn btn-secondary back-btn" onClick={onBack}>
@@ -205,7 +217,9 @@ export default function CompanyDetail({ companyId, onBack }) {
       {/* ── Actions ── */}
       <div className="scrape-section">
         <button className="btn btn-primary" onClick={handleScrape} disabled={scraping}>
-          {scraping ? "Finding contacts..." : "Find HR Contacts"}
+          {scraping ? (
+            <><span className="spinner" /> Searching Hunter.io, Apollo, websites...</>
+          ) : "Find HR Contacts"}
         </button>
         <button className="btn btn-secondary" onClick={() => setShowAddContact(!showAddContact)}>
           {showAddContact ? "Cancel" : "+ Add Contact"}
@@ -254,8 +268,8 @@ export default function CompanyDetail({ companyId, onBack }) {
           <table className="email-table">
             <thead>
               <tr>
-                <th>Email</th>
                 <th>Name</th>
+                <th>Email</th>
                 <th>Title</th>
                 <th>Source</th>
                 <th>Confidence</th>
@@ -264,7 +278,7 @@ export default function CompanyDetail({ companyId, onBack }) {
               </tr>
             </thead>
             <tbody>
-              {company.hr_emails.map((e, i) => {
+              {sortedContacts.map((e, i) => {
                 const contacted = contactedEmails.has(e.email);
                 const isEditing = editingContactIdx === i;
                 // Parse "Source - Name, Title" from source string
@@ -288,8 +302,8 @@ export default function CompanyDetail({ companyId, onBack }) {
                 if (isEditing) {
                   return (
                     <tr key={i} className="editing-row">
-                      <td><input value={editContact.email} onChange={(ev) => setEditContact({...editContact, email: ev.target.value})} className="inline-edit" /></td>
                       <td><input value={editContact.name} onChange={(ev) => setEditContact({...editContact, name: ev.target.value})} className="inline-edit" placeholder="Name" /></td>
+                      <td><input value={editContact.email} onChange={(ev) => setEditContact({...editContact, email: ev.target.value})} className="inline-edit" /></td>
                       <td><input value={editContact.title} onChange={(ev) => setEditContact({...editContact, title: ev.target.value})} className="inline-edit" placeholder="Title" /></td>
                       <td className="source-cell">{sourceOrigin}</td>
                       <td><span className={`badge badge-${e.confidence}`}>{e.confidence}</span></td>
@@ -321,10 +335,10 @@ export default function CompanyDetail({ companyId, onBack }) {
                         }
                       }}
                     >
+                      <td className="name-cell">{sourceName || "-"}</td>
                       <td>
                         <a href={`mailto:${e.email}`} className="email-link" onClick={(ev) => ev.stopPropagation()}>{e.email}</a>
                       </td>
-                      <td className="name-cell">{sourceName || "-"}</td>
                       <td className="title-cell">{sourceTitle || "-"}</td>
                       <td className="source-cell">{sourceOrigin}</td>
                       <td>
