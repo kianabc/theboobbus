@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "./AuthContext";
 import CompanyList from "./components/CompanyList";
 import CompanyDetail from "./components/CompanyDetail";
@@ -53,15 +53,34 @@ function App() {
   const [selectedCompanyId, setSelectedCompanyId] = useState(null);
   const [view, setView] = useState("list");
 
-  const openCompany = (id) => {
-    setSelectedCompanyId(id);
-    setView("detail");
-  };
+  const navigate = useCallback((newView, companyId = null) => {
+    setView(newView);
+    setSelectedCompanyId(companyId);
+    const path = companyId ? `/${newView}/${companyId}` : `/${newView === "list" ? "" : newView}`;
+    window.history.pushState({ view: newView, companyId }, "", path);
+  }, []);
 
-  const goBack = () => {
-    setSelectedCompanyId(null);
-    setView("list");
-  };
+  const openCompany = (id) => navigate("detail", id);
+
+  const goBack = () => navigate("list");
+
+  // Handle browser back/forward
+  useEffect(() => {
+    const handlePop = (e) => {
+      const state = e.state;
+      if (state) {
+        setView(state.view || "list");
+        setSelectedCompanyId(state.companyId || null);
+      } else {
+        setView("list");
+        setSelectedCompanyId(null);
+      }
+    };
+    window.addEventListener("popstate", handlePop);
+    // Set initial state
+    window.history.replaceState({ view: "list", companyId: null }, "", "/");
+    return () => window.removeEventListener("popstate", handlePop);
+  }, []);
 
   if (loading) {
     return (
@@ -101,19 +120,19 @@ function App() {
             </button>
             <button
               className={`btn btn-nav ${view === "activity" ? "active" : ""}`}
-              onClick={() => setView("activity")}
+              onClick={() => navigate("activity")}
             >
               Activity
             </button>
             <button
               className={`btn btn-nav ${view === "boobbus-info" ? "active" : ""}`}
-              onClick={() => setView("boobbus-info")}
+              onClick={() => navigate("boobbus-info")}
             >
               Boob Bus Info
             </button>
             <button
               className={`btn btn-nav ${view === "settings" ? "active" : ""}`}
-              onClick={() => setView("settings")}
+              onClick={() => navigate("settings")}
             >
               Settings
             </button>
@@ -129,7 +148,7 @@ function App() {
 
       <main className="app-main">
         {view === "list" && (
-          <CompanyList onSelect={openCompany} onAdd={() => setView("add")} />
+          <CompanyList onSelect={openCompany} onAdd={() => navigate("add")} />
         )}
         {view === "detail" && (
           <CompanyDetail companyId={selectedCompanyId} onBack={goBack} />
