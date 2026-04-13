@@ -220,9 +220,17 @@ def search_apollo(company_name: str, website: str) -> list[dict]:
                 confidence = "high" if is_strong_hr else ("medium" if is_weak_hr else "low")
                 source = f"Apollo.io - {name_display}, {title}"
                 results.append({"email": email, "confidence": confidence, "source": source})
-            # Free tier: no email available.
-            # Don't guess — guessed emails are unreliable and pollute the contact list.
-            # The person's name/title will show up in Hunter.io results if Hunter finds them.
+            elif first_name and domain:
+                # Free tier: person exists but no verified email.
+                # Store with a placeholder email so user knows this lead exists.
+                # Mark as "unverified" — will be overwritten if they upgrade Apollo and re-search.
+                placeholder = f"upgrade-apollo-for-{first_name.lower()}@{domain}"
+                source = f"Apollo.io (upgrade for email) - {name_display}, {title}"
+                results.append({
+                    "email": placeholder,
+                    "confidence": "unverified",
+                    "source": source,
+                })
 
     except Exception as e:
         logger.error("Apollo.io error for %s: %s", company_name, e)

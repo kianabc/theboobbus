@@ -324,28 +324,44 @@ export default function CompanyDetail({ companyId, onBack }) {
                 }
 
                 const isOpen = composingFor === i;
+                const isUnverified = e.email?.startsWith("upgrade-apollo-for-") || e.confidence === "unverified";
+
                 return (
                   <>
                     <tr
                       key={i}
-                      className={`contact-row ${isOpen ? "contact-row-active" : ""} ${!contacted ? "contact-row-clickable" : ""}`}
+                      className={`contact-row ${isOpen ? "contact-row-active" : ""} ${!contacted && !isUnverified ? "contact-row-clickable" : ""} ${isUnverified ? "contact-row-unverified" : ""}`}
                       onClick={() => {
-                        if (!contacted && editingContactIdx !== i) {
+                        if (!contacted && !isUnverified && editingContactIdx !== i) {
                           setComposingFor(isOpen ? null : i);
                         }
                       }}
                     >
                       <td className="name-cell">{sourceName || "-"}</td>
                       <td>
-                        <a href={`mailto:${e.email}`} className="email-link" onClick={(ev) => ev.stopPropagation()}>{e.email}</a>
+                        {isUnverified ? (
+                          <span className="email-upgrade">
+                            <a href="https://www.apollo.io/pricing" target="_blank" rel="noopener noreferrer" onClick={(ev) => ev.stopPropagation()}>
+                              Upgrade Apollo for email
+                            </a>
+                          </span>
+                        ) : (
+                          <a href={`mailto:${e.email}`} className="email-link" onClick={(ev) => ev.stopPropagation()}>{e.email}</a>
+                        )}
                       </td>
                       <td className="title-cell">{sourceTitle || "-"}</td>
                       <td className="source-cell">{sourceOrigin}</td>
                       <td>
-                        <span className={`badge badge-${e.confidence}`}>{e.confidence}</span>
+                        {isUnverified ? (
+                          <span className="badge badge-unverified">needs upgrade</span>
+                        ) : (
+                          <span className={`badge badge-${e.confidence}`}>{e.confidence}</span>
+                        )}
                       </td>
                       <td>
-                        {contacted ? (
+                        {isUnverified ? (
+                          <span className="badge badge-not-contacted">Lead only</span>
+                        ) : contacted ? (
                           <span className="badge badge-contacted">Contacted</span>
                         ) : (
                           <span className="badge badge-not-contacted">

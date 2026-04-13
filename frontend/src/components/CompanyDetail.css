@@ -203,6 +203,26 @@
   border-left: 3px solid var(--primary);
 }
 
+.contact-row-unverified {
+  opacity: 0.7;
+}
+
+.email-upgrade a {
+  color: #7c3aed;
+  font-weight: 600;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.email-upgrade a:hover {
+  text-decoration: underline;
+}
+
+.badge-unverified {
+  background: #f3f0ff;
+  color: #7c3aed;
+}
+
 .email-link {
   color: var(--primary);
   text-decoration: none;
