@@ -1,41 +1,46 @@
-import sqlite3
+import libsql_client
 import os
-from contextlib import contextmanager
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "hr_emails.db")
-
-
-def get_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+TURSO_URL = os.environ.get("TURSO_DATABASE_URL", "")
+TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN", "")
 
 
-@contextmanager
-def get_db():
-    conn = get_connection()
+def _get_client():
+    if TURSO_URL:
+        return libsql_client.create_client_sync(url=TURSO_URL, auth_token=TURSO_TOKEN)
+    return libsql_client.create_client_sync(url="file:hr_emails.db")
+
+
+def execute(sql, params=None):
+    client = _get_client()
     try:
-        yield conn
-        conn.commit()
+        return client.execute(sql, params or [])
     finally:
-        conn.close()
+        client.close()
+
+
+def batch(statements):
+    """Execute multiple statements in a transaction."""
+    client = _get_client()
+    try:
+        return client.batch(statements)
+    finally:
+        client.close()
 
 
 def init_db():
-    with get_db() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS companies (
+    client = _get_client()
+    try:
+        client.batch([
+            """CREATE TABLE IF NOT EXISTS companies (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 website TEXT,
                 industry TEXT,
                 city TEXT DEFAULT 'Utah',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS hr_emails (
+            )""",
+            """CREATE TABLE IF NOT EXISTS hr_emails (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 company_id INTEGER NOT NULL,
                 email TEXT NOT NULL,
@@ -44,9 +49,9 @@ def init_db():
                 scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (company_id) REFERENCES companies(id),
                 UNIQUE(company_id, email)
-            )
-        """)
-        conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_companies_name
-            ON companies(name)
-        """)
+            )""",
+            """CREATE INDEX IF NOT EXISTS idx_companies_name
+               ON companies(name)""",
+        ])
+    finally:
+        client.close()

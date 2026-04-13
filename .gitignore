@@ -5,3 +5,5 @@ hr_emails.db
 node_modules/
 frontend/dist/
 .env
+.env.local
+.vercel
