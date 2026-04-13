@@ -8,6 +8,8 @@ import ActivityTracker from "./components/ActivityTracker";
 import BoobBusInfo from "./components/BoobBusInfo";
 import "./App.css";
 
+const DORIS_PHOTOS = Array.from({ length: 9 }, (_, i) => `/doris/doris-${i + 1}.png`);
+
 function LoginPage() {
   const { gsiReady, renderGoogleButton } = useAuth();
   const btnRef = useRef(null);
@@ -20,17 +22,26 @@ function LoginPage() {
 
   return (
     <div className="login-page">
-      <img src="/logo.png" alt="Boob Bus" className="login-logo" />
-      <h1>Boob Bus HQ</h1>
-      <p className="login-subtitle">
-        Lead generation & outreach for mobile mammography bookings
-      </p>
-      <div className="login-btn-wrapper">
-        <div ref={btnRef} />
+      <div className="login-photos">
+        {DORIS_PHOTOS.map((src, i) => (
+          <div key={i} className="login-photo" style={{ backgroundImage: `url(${src})` }} />
+        ))}
       </div>
-      <p className="login-footer">
-        Sign in with Google to access the dashboard
-      </p>
+      <div className="login-overlay">
+        <div className="login-card">
+          <img src="/logo.png" alt="Boob Bus" className="login-logo" />
+          <h1>The Boob Bus Co-Pilot</h1>
+          <p className="login-subtitle">
+            Lead generation & outreach for mobile mammography bookings
+          </p>
+          <div className="login-btn-wrapper">
+            <div ref={btnRef} />
+          </div>
+          <p className="login-footer">
+            In loving memory of Doris Jean, the inspiration behind The Boob Bus
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -73,7 +84,7 @@ function App() {
           onClick={goBack}
         />
         <div className="header-text">
-          <h1 onClick={goBack}>Boob Bus HQ</h1>
+          <h1 onClick={goBack}>The Boob Bus Co-Pilot</h1>
           <p className="subtitle">
             Find HR contacts & book mobile mammography visits for Utah companies
           </p>
