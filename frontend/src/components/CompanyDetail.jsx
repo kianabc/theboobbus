@@ -313,7 +313,7 @@ export default function CompanyDetail({ companyId, onBack }) {
                           const newSource = editContact.name || editContact.title
                             ? `${sourceOrigin} - ${[editContact.name, editContact.title].filter(Boolean).join(", ")}`
                             : sourceOrigin;
-                          await updateContact(e.id, { email: editContact.email, source: newSource });
+                          await updateContact(e.id, { email: editContact.email, source: newSource, confidence: "high" });
                           setEditingContactIdx(null);
                           load();
                         }}>Save</button>
