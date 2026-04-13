@@ -33,11 +33,23 @@ def get_current_user(request: Request) -> dict:
         idinfo = id_token.verify_oauth2_token(
             token, google_requests.Request(), client_id
         )
-        return {
+        user = {
             "email": idinfo["email"],
             "name": idinfo.get("name", ""),
             "picture": idinfo.get("picture", ""),
         }
+        # Upsert user profile
+        try:
+            from database import execute
+            execute(
+                """INSERT INTO user_profiles (email, full_name, picture)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(email) DO UPDATE SET full_name = excluded.full_name, picture = excluded.picture, updated_at = CURRENT_TIMESTAMP""",
+                [user["email"], user["name"], user["picture"]],
+            )
+        except Exception:
+            pass
+        return user
     except ValueError as e:
         logger.warning("Invalid Google token: %s", e)
         raise HTTPException(status_code=401, detail="Invalid or expired token")

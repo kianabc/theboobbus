@@ -83,6 +83,12 @@ def init_db():
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (company_id, contact_email)
             )""",
+            """CREATE TABLE IF NOT EXISTS user_profiles (
+                email TEXT PRIMARY KEY,
+                full_name TEXT NOT NULL,
+                picture TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS gmail_tokens (
                 user_email TEXT PRIMARY KEY,
                 refresh_token TEXT NOT NULL,

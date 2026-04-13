@@ -181,6 +181,8 @@ def generate_outreach_email(
     contact_title: str | None = None,
     email_type: str = "initial",
     company_id: int | None = None,
+    sender_name: str | None = None,
+    days_since_last: int | None = None,
 ) -> dict:
     """Generate a personalized outreach email using Claude."""
     api_key = _get_db_setting("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY", "").strip()
@@ -204,8 +206,23 @@ def generate_outreach_email(
         company_city=company_city,
     )
 
-    # For follow-ups, include previously sent emails so AI can avoid repetition
+    # Add sender name context
+    if sender_name:
+        prompt += f"\n\nSign off as: {sender_name}, The Boob Bus team"
+    else:
+        prompt += "\n\nSign off as: The Boob Bus team"
+
+    # For follow-ups, include timing and previous emails
     if email_type != "initial":
+        if days_since_last is not None:
+            if days_since_last <= 2:
+                prompt += f"\n\nThe previous email was sent {days_since_last} day(s) ago. Reference this correctly (e.g., 'I reached out a couple days ago')."
+            elif days_since_last <= 7:
+                prompt += f"\n\nThe previous email was sent {days_since_last} days ago. Reference this correctly (e.g., 'I reached out earlier this week' or 'a few days ago')."
+            else:
+                weeks = days_since_last // 7
+                prompt += f"\n\nThe previous email was sent {days_since_last} days ago (~{weeks} week(s)). Reference this correctly."
+
         previous = _get_previous_emails(contact_email, company_id)
         if previous:
             prompt += f"\n\nHere are the emails previously sent to this contact. Do NOT repeat the same points, angles, or phrasing. Write something genuinely different:\n\n{previous}"
@@ -213,16 +230,31 @@ def generate_outreach_email(
     # Use custom Boob Bus info from database if available
     context = _get_db_setting("boobbus_info") or BOOB_BUS_CONTEXT
 
+    # Load customer feedback if available
+    feedback = _get_db_setting("customer_feedback")
+    feedback_section = ""
+    if feedback:
+        feedback_section = f"""
+
+CUSTOMER FEEDBACK & TESTIMONIALS (you may reference these, but do NOT fabricate new ones):
+{feedback}
+"""
+
     message = client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=500,
         system=f"""You are writing outreach emails on behalf of The Boob Bus, a mobile mammography service in Utah.
 
 {context}
+{feedback_section}
 
-IMPORTANT FORMATTING RULES:
+CRITICAL RULES:
+- NEVER make up statistics, dollar amounts, quotes, stories, or testimonials. Only use facts explicitly provided above.
+- NEVER mention "special rates", "discounts", or "limited time offers" unless explicitly stated in the info above.
 - NEVER use em-dashes or en-dashes (-- or the unicode characters). Use commas, periods, or "and" instead.
+- NEVER sign off as "[Your name]" or "[Your Name]". Use the sender name provided in the prompt.
 - Keep punctuation simple and clean.
+- Most customers pay nothing out of pocket because insurance covers the screening. Mention this.
 
 Return ONLY the email in this exact format:
 Subject: [subject line here]

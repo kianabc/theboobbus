@@ -21,6 +21,7 @@ const PROMPT_ORDER = ["initial", "follow_up", "follow_up_2", "follow_up_3", "fin
 
 export default function BoobBusInfo({ onBack }) {
   const [info, setInfo] = useState("");
+  const [customerFeedback, setCustomerFeedback] = useState("");
   const [prompts, setPrompts] = useState({});
   const [defaults, setDefaults] = useState({});
   const [sequenceLength, setSequenceLength] = useState(3);
@@ -36,6 +37,7 @@ export default function BoobBusInfo({ onBack }) {
       fetchSettings(),
     ]).then(([infoData, promptData, settingsData]) => {
       setInfo(infoData.info);
+      setCustomerFeedback(infoData.customer_feedback || "");
       setPrompts(promptData.prompts);
       setDefaults(promptData.defaults);
       setSequenceLength(settingsData.sequence_length);
@@ -58,7 +60,7 @@ export default function BoobBusInfo({ onBack }) {
       await fetch(`${API}/api/boobbus-info-update`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ info, prompts }),
+        body: JSON.stringify({ info, prompts, customer_feedback: customerFeedback }),
       });
       setStatus({ type: "success", text: "All changes saved" });
     } catch {
@@ -119,6 +121,24 @@ export default function BoobBusInfo({ onBack }) {
             Reset to Default
           </button>
         </div>
+      </div>
+
+      {/* ── Customer Feedback ── */}
+      <div className="info-card">
+        <h2>Customer Feedback & Testimonials</h2>
+        <p className="info-desc">
+          Real quotes, stats, and stories from Boob Bus customers. The AI will reference
+          these in emails but will <strong>never make up</strong> fake testimonials or statistics.
+          Only what you put here will be used.
+        </p>
+
+        <textarea
+          className="info-editor"
+          value={customerFeedback}
+          onChange={(e) => setCustomerFeedback(e.target.value)}
+          rows={8}
+          placeholder={`Example:\n- "The Boob Bus made it so easy for our team. We had 30 employees get screened in one afternoon." - HR Manager at a Provo tech company\n- 95% of employees who used The Boob Bus said they would recommend it\n- One employee's early detection story (with permission): ...`}
+        />
       </div>
 
       {/* ── Email Prompts ── */}

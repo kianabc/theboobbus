@@ -173,6 +173,18 @@ def _send_followup_email(gmail_token: str, sent_email: dict, company: dict) -> b
 
     # Generate the follow-up
     try:
+        # Get sender name from profile
+        sender_name = sent_email["sent_by"]
+        try:
+            profile_rs = execute("SELECT full_name FROM user_profiles WHERE email = ?", [sent_email["sent_by"]])
+            if profile_rs.rows:
+                sender_name = profile_rs.rows[0][0]
+        except Exception:
+            pass
+
+        # Calculate days since last email
+        days_since = get_follow_up_days()  # approximate — it's been at least this many days
+
         email = generate_outreach_email(
             company_name=company["name"],
             company_industry=company["industry"] or "Unknown",
@@ -182,6 +194,8 @@ def _send_followup_email(gmail_token: str, sent_email: dict, company: dict) -> b
             contact_title=contact_title,
             email_type=ai_email_type,
             company_id=sent_email["company_id"],
+            sender_name=sender_name,
+            days_since_last=days_since,
         )
     except Exception as e:
         logger.error("Failed to generate follow-up: %s", e)

@@ -409,13 +409,35 @@ class SendEmailRequest(BaseModel):
 
 
 @app.post("/api/generate-email")
-def generate_email(body: GenerateEmailRequest):
+def generate_email(body: GenerateEmailRequest, request: Request):
     """Generate a personalized outreach email using AI."""
     from email_generator import generate_outreach_email
+    from datetime import datetime, timezone
 
     rs = execute("SELECT name, industry, city FROM companies WHERE id = ?", [body.company_id])
     if not rs.rows:
         raise HTTPException(status_code=404, detail="Company not found")
+
+    # Get sender name from user profile
+    user = get_current_user(request)
+    sender_name = user.get("name", "")
+    profile_rs = execute("SELECT full_name FROM user_profiles WHERE email = ?", [user["email"]])
+    if profile_rs.rows and profile_rs.rows[0][0]:
+        sender_name = profile_rs.rows[0][0]
+
+    # Calculate days since last email to this contact
+    days_since_last = None
+    if body.email_type != "initial":
+        last_rs = execute(
+            "SELECT sent_at FROM sent_emails WHERE company_id = ? AND to_email = ? ORDER BY sent_at DESC LIMIT 1",
+            [body.company_id, body.contact_email],
+        )
+        if last_rs.rows and last_rs.rows[0][0]:
+            try:
+                last_sent = datetime.fromisoformat(last_rs.rows[0][0].replace("Z", "+00:00"))
+                days_since_last = (datetime.now(timezone.utc) - last_sent).days
+            except Exception:
+                pass
 
     company = rs.rows[0]
     result = generate_outreach_email(
@@ -427,6 +449,8 @@ def generate_email(body: GenerateEmailRequest):
         contact_title=body.contact_title,
         email_type=body.email_type,
         company_id=body.company_id,
+        sender_name=sender_name,
+        days_since_last=days_since_last,
     )
     return result
 
@@ -567,6 +591,7 @@ class SettingsUpdate(BaseModel):
     apollo_api_key: str | None = None
     scraping_enabled: bool | None = None
     anthropic_api_key: str | None = None
+    test_interval_seconds: int | None = None
 
 
 def _get_setting(key: str, default: str = "") -> str:
@@ -595,6 +620,7 @@ def get_settings():
         "apollo_api_key": _get_setting("apollo_api_key") or os.environ.get("APOLLO_API_KEY", ""),
         "scraping_enabled": _get_setting("scraping_enabled", "true") == "true",
         "anthropic_api_key": _get_setting("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY", ""),
+        "test_interval_seconds": int(_get_setting("test_interval_seconds", "60")),
     }
 
 
@@ -622,6 +648,8 @@ def update_settings(body: SettingsUpdate):
         _set_setting("scraping_enabled", "true" if body.scraping_enabled else "false")
     if body.anthropic_api_key is not None:
         _set_setting("anthropic_api_key", body.anthropic_api_key)
+    if body.test_interval_seconds is not None:
+        _set_setting("test_interval_seconds", str(body.test_interval_seconds))
     return get_settings()
 
 
@@ -672,12 +700,14 @@ def get_boobbus_info():
         return {"info": rs.rows[0][0]}
     # Return the default hardcoded info
     from email_generator import BOOB_BUS_CONTEXT
-    return {"info": BOOB_BUS_CONTEXT.strip()}
+    feedback = _get_setting("customer_feedback", "")
+    return {"info": BOOB_BUS_CONTEXT.strip(), "customer_feedback": feedback}
 
 
 class BoobBusInfoUpdate(BaseModel):
     info: str | None = None
     prompts: dict | None = None
+    customer_feedback: str | None = None
 
 
 @app.put("/api/boobbus-info-update")
@@ -694,6 +724,10 @@ def update_boobbus_info_v2(body: BoobBusInfoUpdate):
             if key in ("initial", "follow_up", "follow_up_2", "follow_up_3", "final"):
                 _set_setting(f"prompt_{key}", value)
         result["prompts"] = body.prompts
+
+    if body.customer_feedback is not None:
+        _set_setting("customer_feedback", body.customer_feedback)
+        result["customer_feedback"] = body.customer_feedback
 
     return result
 
@@ -784,6 +818,13 @@ def start_test_sequence(req: TestSequenceRequest, request: Request):
         )
         return resp.status_code == 200
 
+    # Get test interval from settings
+    test_interval = int(_get_setting("test_interval_seconds", "60"))
+
+    # Get sender name
+    profile_rs = execute("SELECT full_name FROM user_profiles WHERE email = ?", [user["email"]])
+    sender_name = profile_rs.rows[0][0] if profile_rs.rows else user.get("name", "")
+
     def run_sequence():
         # Step 1: Send initial immediately
         token = _get_access_token()
@@ -793,9 +834,9 @@ def start_test_sequence(req: TestSequenceRequest, request: Request):
         _send_gmail(token, req.test_email, f"[TEST 1/{seq_length}] {req.subject}", req.body)
         logger.info("Test sequence: sent step 1/%d to %s", seq_length, req.test_email)
 
-        # Steps 2+: every 3 minutes
+        # Steps 2+: at configured interval
         for idx, email_type in enumerate(follow_ups):
-            _time.sleep(180)  # 3 minutes
+            _time.sleep(test_interval)
             step = idx + 2
             try:
                 draft = generate_outreach_email(
@@ -803,6 +844,7 @@ def start_test_sequence(req: TestSequenceRequest, request: Request):
                     company_city=company[2] or "Utah", contact_email=req.contact_email,
                     contact_name=req.contact_name, contact_title=req.contact_title,
                     email_type=email_type, company_id=req.company_id,
+                    sender_name=sender_name, days_since_last=0,
                 )
                 token = _get_access_token()
                 if token:
