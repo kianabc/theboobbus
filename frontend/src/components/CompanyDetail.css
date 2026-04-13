@@ -50,14 +50,16 @@
   font-style: italic;
 }
 
-.emails-section {
+.emails-section,
+.outreach-section {
   background: white;
   border: 1px solid var(--gray-200);
   border-radius: var(--radius);
   padding: 24px;
 }
 
-.emails-section h3 {
+.emails-section h3,
+.outreach-section h3 {
   font-size: 18px;
   margin-bottom: 16px;
   color: var(--gray-900);
@@ -118,4 +120,25 @@
 .source-cell {
   color: var(--gray-500);
   font-size: 13px;
+}
+
+.btn-compose {
+  background: #7c3aed;
+  color: white;
+  border: none;
+  padding: 5px 12px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.btn-compose:hover {
+  background: #6d28d9;
+}
+
+.composer-cell {
+  padding: 0 12px 12px !important;
+  border-bottom: 2px solid var(--gray-200) !important;
 }

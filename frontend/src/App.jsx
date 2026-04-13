@@ -1,12 +1,39 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "./AuthContext";
 import CompanyList from "./components/CompanyList";
 import CompanyDetail from "./components/CompanyDetail";
 import AddCompany from "./components/AddCompany";
 import "./App.css";
 
+function LoginPage() {
+  const { gsiReady, renderGoogleButton } = useAuth();
+  const btnRef = useRef(null);
+
+  useEffect(() => {
+    if (gsiReady && btnRef.current) {
+      renderGoogleButton(btnRef.current);
+    }
+  }, [gsiReady, renderGoogleButton]);
+
+  return (
+    <div className="login-page">
+      <img src="/logo.png" alt="Boob Bus" className="login-logo" />
+      <h1>Boob Bus HQ</h1>
+      <p className="login-subtitle">
+        Lead generation & outreach for mobile mammography bookings
+      </p>
+      <div className="login-btn-wrapper">
+        <div ref={btnRef} />
+      </div>
+      <p className="login-footer">
+        Sign in with Google to access the dashboard
+      </p>
+    </div>
+  );
+}
+
 function App() {
-  const { user, loading, logout, btnRef } = useAuth();
+  const { user, loading, logout } = useAuth();
   const [selectedCompanyId, setSelectedCompanyId] = useState(null);
   const [view, setView] = useState("list");
 
@@ -30,21 +57,7 @@ function App() {
   }
 
   if (!user) {
-    return (
-      <div className="login-page">
-        <img src="/logo.png" alt="Boob Bus" className="login-logo" />
-        <h1>Boob Bus HQ</h1>
-        <p className="login-subtitle">
-          Lead generation & outreach for mobile mammography bookings
-        </p>
-        <div className="login-btn-wrapper">
-          <div ref={btnRef} />
-        </div>
-        <p className="login-footer">
-          Sign in with Google to access the dashboard
-        </p>
-      </div>
-    );
+    return <LoginPage />;
   }
 
   return (

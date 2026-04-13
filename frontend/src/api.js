@@ -58,3 +58,29 @@ export async function fetchAllEmails(confidence = "") {
   const res = await authFetch(`${API}/api/emails?${params}`);
   return res.json();
 }
+
+export async function generateEmail(data) {
+  const res = await authFetch(`${API}/api/generate-email`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+export async function sendEmail(data, gmailToken) {
+  const res = await authFetch(`${API}/api/send-email`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Gmail-Token": gmailToken,
+    },
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+export async function fetchOutreachHistory(companyId) {
+  const res = await authFetch(`${API}/api/companies/${companyId}/outreach`);
+  return res.json();
+}

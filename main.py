@@ -225,6 +225,102 @@ def list_all_emails(
     return [{"company": r[0], "industry": r[1], "email": r[2], "confidence": r[3], "source": r[4]} for r in rs.rows]
 
 
+# ── Email Generation & Sending ────────────────────────────────────────────────
+
+class GenerateEmailRequest(BaseModel):
+    company_id: int
+    contact_email: str
+    contact_name: str | None = None
+    contact_title: str | None = None
+    email_type: str = "initial"  # "initial", "follow_up", "final"
+
+
+class SendEmailRequest(BaseModel):
+    to: str
+    subject: str
+    body: str
+    company_id: int | None = None
+
+
+@app.post("/api/generate-email")
+def generate_email(body: GenerateEmailRequest):
+    """Generate a personalized outreach email using AI."""
+    from email_generator import generate_outreach_email
+
+    rs = execute("SELECT name, industry, city FROM companies WHERE id = ?", [body.company_id])
+    if not rs.rows:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    company = rs.rows[0]
+    result = generate_outreach_email(
+        company_name=company[0],
+        company_industry=company[1] or "Unknown",
+        company_city=company[2] or "Utah",
+        contact_email=body.contact_email,
+        contact_name=body.contact_name,
+        contact_title=body.contact_title,
+        email_type=body.email_type,
+    )
+    return result
+
+
+@app.post("/api/send-email")
+def send_email(body: SendEmailRequest, request: Request):
+    """Send an email via Gmail using the user's Google OAuth token.
+
+    Requires the frontend to pass a Gmail access token.
+    """
+    gmail_token = request.headers.get("X-Gmail-Token", "")
+    if not gmail_token:
+        raise HTTPException(status_code=400, detail="Gmail access token required. Please grant Gmail permissions.")
+
+    import base64
+    from email.mime.text import MIMEText
+
+    # Build the email
+    msg = MIMEText(body.body)
+    msg["To"] = body.to
+    msg["Subject"] = body.subject
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+
+    # Send via Gmail API
+    import requests as http_requests
+    resp = http_requests.post(
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        headers={
+            "Authorization": f"Bearer {gmail_token}",
+            "Content-Type": "application/json",
+        },
+        json={"raw": raw},
+        timeout=15,
+    )
+
+    if resp.status_code != 200:
+        logger.error("Gmail send error: %s %s", resp.status_code, resp.text)
+        raise HTTPException(status_code=resp.status_code, detail=f"Gmail error: {resp.json().get('error', {}).get('message', 'Unknown')}")
+
+    # Log the sent email
+    if body.company_id:
+        execute(
+            """INSERT INTO sent_emails (company_id, to_email, subject, body, sent_by)
+               VALUES (?, ?, ?, ?, ?)""",
+            [body.company_id, body.to, body.subject, body.body,
+             get_current_user(request).get("email", "unknown")],
+        )
+
+    return {"status": "sent", "message_id": resp.json().get("id")}
+
+
+@app.get("/api/companies/{company_id}/outreach")
+def get_outreach_history(company_id: int):
+    """Get sent email history for a company."""
+    rs = execute(
+        "SELECT id, to_email, subject, sent_by, sent_at FROM sent_emails WHERE company_id = ? ORDER BY sent_at DESC",
+        [company_id],
+    )
+    return [{"id": r[0], "to_email": r[1], "subject": r[2], "sent_by": r[3], "sent_at": r[4]} for r in rs.rows]
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

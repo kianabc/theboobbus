@@ -1,13 +1,19 @@
 import { useState, useEffect } from "react";
-import { fetchCompany, scrapeCompany } from "../api";
+import { fetchCompany, scrapeCompany, fetchOutreachHistory } from "../api";
+import EmailComposer from "./EmailComposer";
 import "./CompanyDetail.css";
 
 export default function CompanyDetail({ companyId, onBack }) {
   const [company, setCompany] = useState(null);
   const [scraping, setScraping] = useState(false);
   const [scrapeResult, setScrapeResult] = useState(null);
+  const [composingFor, setComposingFor] = useState(null);
+  const [outreach, setOutreach] = useState([]);
 
-  const load = () => fetchCompany(companyId).then(setCompany);
+  const load = () => {
+    fetchCompany(companyId).then(setCompany);
+    fetchOutreachHistory(companyId).then(setOutreach);
+  };
 
   useEffect(() => {
     load();
@@ -20,12 +26,12 @@ export default function CompanyDetail({ companyId, onBack }) {
       const results = await scrapeCompany(companyId);
       setScrapeResult(
         results.length > 0
-          ? `Found ${results.length} email(s)`
-          : "No emails found on this website"
+          ? `Found ${results.length} contact(s)`
+          : "No contacts found for this company"
       );
       await load();
     } catch {
-      setScrapeResult("Scraping failed — try again later");
+      setScrapeResult("Search failed — try again later");
     } finally {
       setScraping(false);
     }
@@ -78,34 +84,88 @@ export default function CompanyDetail({ companyId, onBack }) {
             decision makers at this company.
           </p>
         ) : (
+          <>
+            <table className="email-table">
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>Confidence</th>
+                  <th>Source</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {company.hr_emails.map((e, i) => (
+                  <>
+                    <tr key={i}>
+                      <td>
+                        <a href={`mailto:${e.email}`} className="email-link">
+                          {e.email}
+                        </a>
+                      </td>
+                      <td>
+                        <span className={`badge badge-${e.confidence}`}>
+                          {e.confidence}
+                        </span>
+                      </td>
+                      <td className="source-cell">{e.source}</td>
+                      <td>
+                        <button
+                          className="btn btn-compose"
+                          onClick={() =>
+                            setComposingFor(composingFor === i ? null : i)
+                          }
+                        >
+                          {composingFor === i ? "Close" : "Compose"}
+                        </button>
+                      </td>
+                    </tr>
+                    {composingFor === i && (
+                      <tr key={`composer-${i}`}>
+                        <td colSpan={4} className="composer-cell">
+                          <EmailComposer
+                            companyId={companyId}
+                            contact={e}
+                            onSent={load}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+      </div>
+
+      {outreach.length > 0 && (
+        <div className="outreach-section">
+          <h3>Outreach History ({outreach.length})</h3>
           <table className="email-table">
             <thead>
               <tr>
-                <th>Email</th>
-                <th>Confidence</th>
-                <th>Source</th>
+                <th>To</th>
+                <th>Subject</th>
+                <th>Sent By</th>
+                <th>Date</th>
               </tr>
             </thead>
             <tbody>
-              {company.hr_emails.map((e, i) => (
-                <tr key={i}>
-                  <td>
-                    <a href={`mailto:${e.email}`} className="email-link">
-                      {e.email}
-                    </a>
+              {outreach.map((o) => (
+                <tr key={o.id}>
+                  <td>{o.to_email}</td>
+                  <td>{o.subject}</td>
+                  <td>{o.sent_by}</td>
+                  <td className="source-cell">
+                    {new Date(o.sent_at).toLocaleDateString()}
                   </td>
-                  <td>
-                    <span className={`badge badge-${e.confidence}`}>
-                      {e.confidence}
-                    </span>
-                  </td>
-                  <td className="source-cell">{e.source}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

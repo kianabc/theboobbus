@@ -50,6 +50,16 @@ def init_db():
             )""",
             """CREATE INDEX IF NOT EXISTS idx_companies_name
                ON companies(name)""",
+            """CREATE TABLE IF NOT EXISTS sent_emails (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_id INTEGER,
+                to_email TEXT NOT NULL,
+                subject TEXT,
+                body TEXT,
+                sent_by TEXT,
+                sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (company_id) REFERENCES companies(id)
+            )""",
         ])
     finally:
         client.close()

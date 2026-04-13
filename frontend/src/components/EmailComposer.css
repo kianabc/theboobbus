@@ -1,0 +1,125 @@
+.email-composer {
+  background: white;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-top: 8px;
+}
+
+.composer-header h4 {
+  font-size: 15px;
+  color: var(--gray-900);
+  margin: 0 0 4px;
+}
+
+.composer-contact-info {
+  font-size: 13px;
+  color: var(--gray-500);
+  margin: 0 0 14px;
+}
+
+.composer-controls {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.type-select {
+  padding: 8px 12px;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius);
+  background: white;
+  font-size: 13px;
+}
+
+.btn-generate {
+  background: #7c3aed;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.15s;
+}
+
+.btn-generate:hover {
+  background: #6d28d9;
+}
+
+.btn-generate:disabled {
+  background: var(--gray-300);
+  cursor: not-allowed;
+}
+
+.composer-subject {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius);
+  font-size: 14px;
+  margin-bottom: 8px;
+  outline: none;
+}
+
+.composer-subject:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(214, 84, 142, 0.1);
+}
+
+.composer-body {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius);
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
+  font-family: inherit;
+  outline: none;
+}
+
+.composer-body:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(214, 84, 142, 0.1);
+}
+
+.composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.btn-send {
+  background: var(--primary);
+  color: white;
+  border: none;
+  padding: 10px 24px;
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 600;
+  transition: background 0.15s;
+}
+
+.btn-send:hover {
+  background: var(--primary-hover);
+}
+
+.btn-send:disabled {
+  background: var(--gray-300);
+  cursor: not-allowed;
+}
+
+.composer-status {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.composer-status.success {
+  color: var(--green);
+}
+
+.composer-status.error {
+  color: var(--red);
+}
