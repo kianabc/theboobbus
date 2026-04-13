@@ -1,28 +1,39 @@
 import { useState, useEffect } from "react";
-import { fetchCompanies, fetchIndustries } from "../api";
+import { fetchCompanies, fetchIndustries, fetchCities } from "../api";
 import "./CompanyList.css";
 
 export default function CompanyList({ onSelect, onAdd }) {
   const [companies, setCompanies] = useState([]);
   const [industries, setIndustries] = useState([]);
+  const [cities, setCities] = useState([]);
   const [search, setSearch] = useState("");
   const [industry, setIndustry] = useState("");
+  const [city, setCity] = useState("");
+  const [sortBy, setSortBy] = useState("name");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchIndustries().then(setIndustries);
+    fetchCities().then(setCities);
   }, []);
 
   useEffect(() => {
     setLoading(true);
     const timeout = setTimeout(() => {
-      fetchCompanies(search, industry).then((data) => {
+      fetchCompanies(search, industry, city).then((data) => {
         setCompanies(data);
         setLoading(false);
       });
     }, 200);
     return () => clearTimeout(timeout);
-  }, [search, industry]);
+  }, [search, industry, city]);
+
+  const sortedCompanies = [...companies].sort((a, b) => {
+    if (sortBy === "newest") {
+      return (b.id || 0) - (a.id || 0); // Higher ID = newer
+    }
+    return (a.name || "").localeCompare(b.name || "");
+  });
 
   return (
     <div className="company-list">
@@ -46,6 +57,26 @@ export default function CompanyList({ onSelect, onAdd }) {
             </option>
           ))}
         </select>
+        <select
+          value={city}
+          onChange={(e) => setCity(e.target.value)}
+          className="industry-select"
+        >
+          <option value="">All Cities</option>
+          {cities.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value)}
+          className="industry-select"
+        >
+          <option value="name">Sort: A-Z</option>
+          <option value="newest">Sort: Newest First</option>
+        </select>
         <button className="btn btn-primary" onClick={onAdd}>
           + Add Company
         </button>
@@ -57,7 +88,7 @@ export default function CompanyList({ onSelect, onAdd }) {
         <div className="empty">No companies found.</div>
       ) : (
         <div className="company-grid">
-          {companies.map((c) => (
+          {sortedCompanies.map((c) => (
             <div
               key={c.id}
               className="company-card"

@@ -85,10 +85,18 @@ def list_industries():
     return [r[0] for r in rs.rows]
 
 
+@app.get("/api/cities", response_model=list[str])
+def list_cities():
+    """List all distinct cities."""
+    rs = execute("SELECT DISTINCT city FROM companies WHERE city IS NOT NULL ORDER BY city")
+    return [r[0] for r in rs.rows]
+
+
 @app.get("/api/companies", response_model=list[CompanyOut])
 def list_companies(
     search: str | None = Query(None, description="Filter companies by name (case-insensitive)"),
     industry: str | None = Query(None, description="Filter by industry"),
+    city: str | None = Query(None, description="Filter by city"),
 ):
     """List all companies, optionally filtered by name or industry."""
     query = """
@@ -104,6 +112,9 @@ def list_companies(
     if industry:
         query += " AND c.industry LIKE ?"
         params.append(f"%{industry}%")
+    if city:
+        query += " AND c.city = ?"
+        params.append(city)
     query += " GROUP BY c.id ORDER BY c.name"
     rs = execute(query, params)
     return [{"id": r[0], "name": r[1], "website": r[2], "industry": r[3], "city": r[4], "description": r[5], "email_count": r[6]} for r in rs.rows]

@@ -20,10 +20,16 @@ async function authFetch(url, options = {}) {
   return res;
 }
 
-export async function fetchCompanies(search = "", industry = "") {
+export async function fetchCities() {
+  const res = await authFetch(`${API}/api/cities`);
+  return res.json();
+}
+
+export async function fetchCompanies(search = "", industry = "", city = "") {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
   if (industry) params.set("industry", industry);
+  if (city) params.set("city", city);
   const res = await authFetch(`${API}/api/companies?${params}`);
   return res.json();
 }
