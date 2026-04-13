@@ -15,8 +15,11 @@ export default function EmailComposer({ companyId, contact, onSent }) {
   // Test email state
   const [showTestInput, setShowTestInput] = useState(false);
   const [testEmail, setTestEmail] = useState("");
-  const [testQueued, setTestQueued] = useState(false);
+  const [testRunning, setTestRunning] = useState(false);
+  const [testStep, setTestStep] = useState(0); // 0=not started, 1=initial sent, 2+=follow-ups
+  const [testTotalSteps, setTestTotalSteps] = useState(0);
   const [testCountdown, setTestCountdown] = useState(0);
+  const [testTimers, setTestTimers] = useState([]);
 
   const contactName = contact.source?.match(/- (.+?),/)?.[1] || null;
   const contactTitle = contact.source?.match(/, (.+?)$/)?.[1]?.replace(/\(.*\)/, "").trim() || null;
@@ -126,27 +129,86 @@ export default function EmailComposer({ companyId, contact, onSent }) {
     doGmailSend(contact.email, false);
   };
 
-  const handleTestSend = () => {
+  const handleTestSequence = async () => {
     if (!testEmail.trim() || !subject.trim() || !body.trim()) {
       setStatus({ type: "error", text: "Enter a test email and fill in the subject/body" });
       return;
     }
-    setTestQueued(true);
-    setTestCountdown(180); // 3 minutes
-    setStatus({ type: "info", text: `Test email queued. Sending in 3 minutes...` });
 
-    // Send after 3 minutes
-    setTimeout(() => {
-      doGmailSend(testEmail, true);
-      setTestQueued(false);
-      setTestCountdown(0);
-    }, 180000);
+    setTestRunning(true);
+    setTestStep(1);
+
+    // Fetch settings to know sequence length
+    const { fetchSettings } = await import("../api");
+    const settings = await fetchSettings();
+    const totalSteps = settings.sequence_length || 3;
+    setTestTotalSteps(totalSteps);
+
+    // Step 1: Send initial immediately
+    setStatus({ type: "info", text: `Sending initial outreach (1/${totalSteps})...` });
+    doGmailSend(testEmail, true);
+
+    // Steps 2+: Generate and send follow-ups every 3 minutes
+    const followUpTypes = [];
+    if (totalSteps === 2) {
+      followUpTypes.push("final");
+    } else {
+      for (let i = 1; i < totalSteps - 1; i++) followUpTypes.push("follow_up");
+      followUpTypes.push("final");
+    }
+
+    const timers = [];
+    followUpTypes.forEach((emailType, idx) => {
+      const delay = (idx + 1) * 180000; // 3 min increments
+      const stepNum = idx + 2;
+      const timer = setTimeout(async () => {
+        setTestStep(stepNum);
+        setStatus({ type: "info", text: `Generating & sending step ${stepNum}/${totalSteps}...` });
+        try {
+          // Generate follow-up with AI
+          const draft = await generateEmail({
+            company_id: companyId,
+            contact_email: contact.email,
+            contact_name: contactName,
+            contact_title: contactTitle,
+            email_type: emailType,
+          });
+          // Send it
+          const tokenClient = window.google.accounts.oauth2.initTokenClient({
+            client_id: GOOGLE_CLIENT_ID,
+            scope: "https://www.googleapis.com/auth/gmail.send",
+            callback: async (tokenResponse) => {
+              if (tokenResponse.error) return;
+              await sendEmail(
+                { to: testEmail, subject: `[TEST ${stepNum}/${totalSteps}] ${draft.subject}`, body: draft.body, company_id: null, email_type: emailType },
+                tokenResponse.access_token
+              );
+              setStatus({ type: "success", text: `Step ${stepNum}/${totalSteps} sent! ${stepNum < totalSteps ? `Next in 3 min...` : "Test sequence complete!"}` });
+              if (stepNum === totalSteps) {
+                setTestRunning(false);
+              }
+            },
+          });
+          tokenClient.requestAccessToken();
+        } catch (e) {
+          setStatus({ type: "error", text: `Step ${stepNum} failed: ${e.message}` });
+        }
+      }, delay);
+      timers.push(timer);
+    });
+    setTestTimers(timers);
+
+    // Start countdown for next follow-up
+    setTestCountdown(180);
   };
 
   const cancelTest = () => {
-    setTestQueued(false);
+    testTimers.forEach(clearTimeout);
+    setTestTimers([]);
+    setTestRunning(false);
+    setTestStep(0);
     setTestCountdown(0);
-    setStatus(null);
+    setStatus({ type: "info", text: "Test sequence cancelled" });
   };
 
   const formatCountdown = (secs) => {
@@ -210,7 +272,7 @@ export default function EmailComposer({ companyId, contact, onSent }) {
               className="btn btn-test"
               onClick={() => setShowTestInput(true)}
             >
-              Send Test
+              Test Sequence
             </button>
           ) : (
             <div className="test-input-row">
@@ -220,23 +282,25 @@ export default function EmailComposer({ companyId, contact, onSent }) {
                 value={testEmail}
                 onChange={(e) => setTestEmail(e.target.value)}
                 className="test-email-input"
+                disabled={testRunning}
               />
-              {testQueued ? (
+              {testRunning ? (
                 <>
                   <span className="test-countdown">
-                    Sending in {formatCountdown(testCountdown)}
+                    Step {testStep}/{testTotalSteps}
+                    {testCountdown > 0 && ` - next in ${formatCountdown(testCountdown)}`}
                   </span>
                   <button className="btn btn-cancel-test" onClick={cancelTest}>
-                    Cancel
+                    Stop
                   </button>
                 </>
               ) : (
                 <button
                   className="btn btn-test"
-                  onClick={handleTestSend}
+                  onClick={handleTestSequence}
                   disabled={sending || !testEmail.trim() || !subject.trim()}
                 >
-                  Queue Test
+                  Run Test
                 </button>
               )}
             </div>
