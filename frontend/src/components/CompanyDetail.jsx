@@ -72,11 +72,15 @@ export default function CompanyDetail({ companyId, onBack }) {
   const handleSaveEdit = async () => {
     setSavingEdit(true);
     try {
-      await updateCompany(companyId, editForm);
-      setEditing(false);
-      load();
+      const result = await updateCompany(companyId, editForm);
+      if (result.id) {
+        setEditing(false);
+        load();
+      } else {
+        alert("Update failed: " + JSON.stringify(result));
+      }
     } catch (e) {
-      console.error("Update failed:", e);
+      alert("Update failed: " + e.message);
     } finally {
       setSavingEdit(false);
     }
