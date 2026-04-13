@@ -59,6 +59,7 @@ class CompanyOut(BaseModel):
 
 
 class HREmailOut(BaseModel):
+    id: int | None = None
     email: str
     confidence: str
     source: str | None
