@@ -222,6 +222,16 @@
   box-shadow: 0 0 0 3px rgba(214, 84, 142, 0.1);
 }
 
+.upgrade-link {
+  color: var(--primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.upgrade-link:hover {
+  text-decoration: underline;
+}
+
 .api-key-input {
   width: 100%;
   padding: 8px 12px;

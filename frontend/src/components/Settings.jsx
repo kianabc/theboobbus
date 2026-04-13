@@ -182,7 +182,13 @@ export default function Settings({ onBack }) {
                 onChange={(e) => update("apollo_api_key", e.target.value)}
                 className="api-key-input"
               />
-              <span className="settings-hint">Leave blank to use environment variable</span>
+              <span className="settings-hint">
+                Free tier: names are partially hidden, no emails.{" "}
+                <a href="https://www.apollo.io/pricing" target="_blank" rel="noopener noreferrer" className="upgrade-link">
+                  Upgrade Apollo plan
+                </a>{" "}
+                to get full names and verified emails.
+              </span>
             </div>
           )}
         </div>
