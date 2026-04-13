@@ -18,7 +18,7 @@
 }
 
 .login-logo {
-  width: 200px;
+  width: 280px;
   margin-bottom: 24px;
 }
 
@@ -58,11 +58,8 @@
 }
 
 .header-logo {
-  height: 80px;
+  height: 44px;
   cursor: pointer;
-  border-radius: 10px;
-  background: white;
-  padding: 6px 12px;
 }
 
 .header-text {
