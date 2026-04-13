@@ -38,7 +38,9 @@ function LoginPage() {
             <div ref={btnRef} />
           </div>
           <p className="login-footer">
-            In loving memory of Doris Jean, the inspiration behind The Boob Bus
+            In Loving Memory Of Doris Jean<br />
+            <span className="login-footer-sub">the inspiration behind</span><br />
+            <span className="login-footer-brand">The Boob Bus</span>
           </p>
         </div>
       </div>
