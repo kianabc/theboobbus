@@ -441,11 +441,21 @@ def send_email(body: SendEmailRequest, request: Request):
 
     import base64
     from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
 
-    # Build the email
-    msg = MIMEText(body.body)
+    # Generate tracking pixel
+    tracking_id = str(uuid.uuid4())
+    base_url = request.headers.get("Origin", "https://theboobbus.vercel.app")
+    tracking_url = f"{base_url}/api/track/{tracking_id}"
+    tracking_pixel = f'<img src="{tracking_url}" width="1" height="1" style="display:none" />'
+
+    # Build HTML email with tracking pixel
+    html_body = body.body.replace("\n", "<br>") + tracking_pixel
+    msg = MIMEMultipart("alternative")
     msg["To"] = body.to
     msg["Subject"] = body.subject
+    msg.attach(MIMEText(body.body, "plain"))
+    msg.attach(MIMEText(html_body, "html"))
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
 
     # Send via Gmail API
@@ -476,13 +486,22 @@ def send_email(body: SendEmailRequest, request: Request):
     if email_type != "final":
         next_follow_up = (datetime.now(timezone.utc) + timedelta(days=follow_up_days)).isoformat()
 
+    sent_email_id = None
     if body.company_id:
-        execute(
+        rs_insert = execute(
             """INSERT INTO sent_emails
                (company_id, to_email, subject, body, sent_by, email_type, gmail_message_id, next_follow_up_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             [body.company_id, body.to, body.subject, body.body,
              user_email, email_type, gmail_msg_id, next_follow_up],
+        )
+        sent_email_id = rs_insert.last_insert_rowid
+
+    # Create tracking record for open detection
+    if sent_email_id:
+        execute(
+            "INSERT INTO email_opens (tracking_id, sent_email_id) VALUES (?, ?)",
+            [tracking_id, sent_email_id],
         )
 
     # Store the Gmail refresh token if provided (for auto follow-ups)
@@ -502,14 +521,17 @@ def send_email(body: SendEmailRequest, request: Request):
 def get_outreach_history(company_id: int):
     """Get sent email history for a company."""
     rs = execute(
-        """SELECT id, to_email, subject, sent_by, email_type, replied, sent_at, next_follow_up_at
-           FROM sent_emails WHERE company_id = ? ORDER BY sent_at DESC""",
+        """SELECT se.id, se.to_email, se.subject, se.sent_by, se.email_type, se.replied,
+                  se.sent_at, se.next_follow_up_at, eo.opened_at, eo.open_count
+           FROM sent_emails se
+           LEFT JOIN email_opens eo ON eo.sent_email_id = se.id
+           WHERE se.company_id = ? ORDER BY se.sent_at DESC""",
         [company_id],
     )
     return [{
         "id": r[0], "to_email": r[1], "subject": r[2], "sent_by": r[3],
         "email_type": r[4], "replied": bool(r[5]), "sent_at": r[6],
-        "next_follow_up_at": r[7],
+        "next_follow_up_at": r[7], "opened_at": r[8], "open_count": r[9] or 0,
     } for r in rs.rows]
 
 
@@ -666,6 +688,31 @@ def get_prompts():
 
 
 # ── Cron: Auto Follow-ups ────────────────────────────────────────────────────
+
+# ── Email Open Tracking ───────────────────────────────────────────────────────
+
+from fastapi.responses import Response
+import uuid
+
+
+@app.get("/api/track/{tracking_id}")
+def track_email_open(tracking_id: str):
+    """Tracking pixel endpoint. Logs when an email is opened."""
+    # Update the open record
+    rs = execute("SELECT sent_email_id, open_count FROM email_opens WHERE tracking_id = ?", [tracking_id])
+    if rs.rows:
+        execute(
+            "UPDATE email_opens SET opened_at = CURRENT_TIMESTAMP, open_count = open_count + 1 WHERE tracking_id = ?",
+            [tracking_id],
+        )
+
+    # Return a 1x1 transparent GIF
+    pixel = b'\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00\x21\xf9\x04\x00\x00\x00\x00\x00\x2c\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02\x44\x01\x00\x3b'
+    return Response(content=pixel, media_type="image/gif", headers={
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+    })
+
 
 @app.post("/api/cron/follow-ups", dependencies=[])
 def run_follow_ups(request: Request):

@@ -354,11 +354,15 @@ export default function CompanyDetail({ companyId, onBack }) {
                   <td><span className="badge badge-type">{o.email_type}</span></td>
                   <td>
                     {o.replied ? (
-                      <span className="badge badge-high">Replied</span>
+                      <span className="badge badge-replied">Replied</span>
+                    ) : o.opened_at ? (
+                      <span className="badge badge-opened" title={`Opened ${o.open_count}x, last: ${new Date(o.opened_at).toLocaleString()}`}>
+                        Opened ({o.open_count}x)
+                      </span>
                     ) : o.next_follow_up_at ? (
-                      <span className="badge badge-medium" title={`Follow-up on ${new Date(o.next_follow_up_at).toLocaleDateString()}`}>Pending</span>
+                      <span className="badge badge-pending" title={`Follow-up on ${new Date(o.next_follow_up_at).toLocaleDateString()}`}>Waiting</span>
                     ) : (
-                      <span className="badge badge-low">Done</span>
+                      <span className="badge badge-low">Sent</span>
                     )}
                   </td>
                   <td className="source-cell">{new Date(o.sent_at).toLocaleDateString()}</td>

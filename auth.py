@@ -10,7 +10,7 @@ from google.auth.transport import requests as google_requests
 logger = logging.getLogger(__name__)
 
 # Paths that don't require user auth (protected by other means)
-PUBLIC_PATHS = ["/api/cron/"]
+PUBLIC_PATHS = ["/api/cron/", "/api/track/"]
 
 
 def get_current_user(request: Request) -> dict:

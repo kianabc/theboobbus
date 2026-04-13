@@ -264,6 +264,11 @@
   white-space: nowrap;
 }
 
+.badge-opened {
+  background: #fef3c7;
+  color: #b45309;
+}
+
 .badge-contacted {
   background: #dbeafe;
   color: #2563eb;

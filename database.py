@@ -68,6 +68,13 @@ def init_db():
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             )""",
+            """CREATE TABLE IF NOT EXISTS email_opens (
+                tracking_id TEXT PRIMARY KEY,
+                sent_email_id INTEGER NOT NULL,
+                opened_at TIMESTAMP,
+                open_count INTEGER DEFAULT 0,
+                FOREIGN KEY (sent_email_id) REFERENCES sent_emails(id)
+            )""",
             """CREATE TABLE IF NOT EXISTS email_drafts (
                 company_id INTEGER NOT NULL,
                 contact_email TEXT NOT NULL,
