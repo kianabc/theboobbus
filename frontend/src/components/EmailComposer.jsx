@@ -2,8 +2,6 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { generateEmail, sendEmail, getDraft, saveDraft } from "../api";
 import "./EmailComposer.css";
 
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-
 export default function EmailComposer({ companyId, contact, onSent }) {
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
@@ -126,45 +124,32 @@ export default function EmailComposer({ companyId, contact, onSent }) {
     }
   };
 
-  const doGmailSend = (toEmail, isTest) => {
+  const doGmailSend = async (toEmail, isTest) => {
     setSending(true);
     setStatus(null);
-
-    const tokenClient = window.google.accounts.oauth2.initTokenClient({
-      client_id: GOOGLE_CLIENT_ID,
-      scope: "https://www.googleapis.com/auth/gmail.send",
-      callback: async (tokenResponse) => {
-        if (tokenResponse.error) {
-          setStatus({ type: "error", text: "Gmail permission denied" });
-          setSending(false);
-          return;
+    try {
+      const result = await sendEmail({
+        to: toEmail,
+        subject: isTest ? `[TEST] ${subject}` : subject,
+        body,
+        company_id: isTest ? null : companyId,
+        email_type: "initial",
+      });
+      if (result.status === "sent") {
+        if (isTest) {
+          setStatus({ type: "success", text: `Test sent to ${toEmail}` });
+        } else {
+          setStatus({ type: "success", text: "Email sent!" });
+          if (onSent) onSent();
         }
-        try {
-          await sendEmail(
-            {
-              to: toEmail,
-              subject: isTest ? `[TEST] ${subject}` : subject,
-              body,
-              company_id: isTest ? null : companyId,
-              email_type: "initial",
-            },
-            tokenResponse.access_token
-          );
-          if (isTest) {
-            setStatus({ type: "success", text: `Test sent to ${toEmail}` });
-            // Don't close composer, don't call onSent
-          } else {
-            setStatus({ type: "success", text: "Email sent!" });
-            if (onSent) onSent();
-          }
-        } catch (e) {
-          setStatus({ type: "error", text: "Failed to send" });
-        } finally {
-          setSending(false);
-        }
-      },
-    });
-    tokenClient.requestAccessToken();
+      } else {
+        setStatus({ type: "error", text: result.detail || "Failed to send" });
+      }
+    } catch (e) {
+      setStatus({ type: "error", text: "Failed to send. Make sure Gmail is connected in Settings." });
+    } finally {
+      setSending(false);
+    }
   };
 
   const handleSend = () => {
@@ -224,23 +209,20 @@ export default function EmailComposer({ companyId, contact, onSent }) {
             contact_title: contactTitle,
             email_type: emailType,
           });
-          // Send it
-          const tokenClient = window.google.accounts.oauth2.initTokenClient({
-            client_id: GOOGLE_CLIENT_ID,
-            scope: "https://www.googleapis.com/auth/gmail.send",
-            callback: async (tokenResponse) => {
-              if (tokenResponse.error) return;
-              await sendEmail(
-                { to: testEmail, subject: `[TEST ${stepNum}/${totalSteps}] ${draft.subject}`, body: draft.body, company_id: null, email_type: emailType },
-                tokenResponse.access_token
-              );
-              setStatus({ type: "success", text: `Step ${stepNum}/${totalSteps} sent! ${stepNum < totalSteps ? `Next in 3 min...` : "Test sequence complete!"}` });
-              if (stepNum === totalSteps) {
-                setTestRunning(false);
-              }
-            },
+          // Send it via backend (uses stored refresh token)
+          const result = await sendEmail({
+            to: testEmail,
+            subject: `[TEST ${stepNum}/${totalSteps}] ${draft.subject}`,
+            body: draft.body,
+            company_id: null,
+            email_type: emailType,
           });
-          tokenClient.requestAccessToken();
+          if (result.status === "sent") {
+            setStatus({ type: "success", text: `Step ${stepNum}/${totalSteps} sent! ${stepNum < totalSteps ? `Next in 3 min...` : "Test sequence complete!"}` });
+          }
+          if (stepNum === totalSteps) {
+            setTestRunning(false);
+          }
         } catch (e) {
           setStatus({ type: "error", text: `Step ${stepNum} failed: ${e.message}` });
         }

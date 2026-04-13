@@ -68,13 +68,12 @@ export async function generateEmail(data) {
   return res.json();
 }
 
-export async function sendEmail(data, gmailToken) {
+export async function sendEmail(data, gmailToken = null) {
+  const headers = { "Content-Type": "application/json" };
+  if (gmailToken) headers["X-Gmail-Token"] = gmailToken;
   const res = await authFetch(`${API}/api/send-email`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Gmail-Token": gmailToken,
-    },
+    headers,
     body: JSON.stringify(data),
   });
   return res.json();

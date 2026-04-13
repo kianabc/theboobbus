@@ -433,13 +433,32 @@ def generate_email(body: GenerateEmailRequest):
 
 @app.post("/api/send-email")
 def send_email(body: SendEmailRequest, request: Request):
-    """Send an email via Gmail using the user's Google OAuth token.
+    """Send an email via Gmail.
 
-    Requires the frontend to pass a Gmail access token.
+    Uses stored refresh token if available, otherwise requires X-Gmail-Token header.
     """
+    import requests as http_requests
+
     gmail_token = request.headers.get("X-Gmail-Token", "")
+
+    # Try to use stored refresh token first
     if not gmail_token:
-        raise HTTPException(status_code=400, detail="Gmail access token required. Please grant Gmail permissions.")
+        user = get_current_user(request)
+        rs = execute("SELECT refresh_token FROM gmail_tokens WHERE user_email = ?", [user["email"]])
+        if rs.rows:
+            client_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+            client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
+            resp = http_requests.post("https://oauth2.googleapis.com/token", data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "refresh_token": rs.rows[0][0],
+                "grant_type": "refresh_token",
+            }, timeout=10)
+            if resp.status_code == 200:
+                gmail_token = resp.json().get("access_token", "")
+
+    if not gmail_token:
+        raise HTTPException(status_code=400, detail="Gmail not connected. Go to Settings to connect your Gmail account.")
 
     import base64
     from email.mime.text import MIMEText
