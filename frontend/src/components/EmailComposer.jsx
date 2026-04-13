@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { generateEmail, sendEmail, getDraft, saveDraft } from "../api";
+import { generateEmail, sendEmail, getDraft, saveDraft, startTestSequence } from "../api";
 import "./EmailComposer.css";
 
 export default function EmailComposer({ companyId, contact, onSent }) {
@@ -14,10 +14,6 @@ export default function EmailComposer({ companyId, contact, onSent }) {
   const [showTestInput, setShowTestInput] = useState(false);
   const [testEmail, setTestEmail] = useState("");
   const [testRunning, setTestRunning] = useState(false);
-  const [testStep, setTestStep] = useState(0); // 0=not started, 1=initial sent, 2+=follow-ups
-  const [testTotalSteps, setTestTotalSteps] = useState(0);
-  const [testCountdown, setTestCountdown] = useState(0);
-  const [testTimers, setTestTimers] = useState([]);
 
   const contactName = contact.source?.match(/- (.+?),/)?.[1] || null;
   const contactTitle = contact.source?.match(/, (.+?)$/)?.[1]?.replace(/\(.*\)/, "").trim() || null;
@@ -89,20 +85,6 @@ export default function EmailComposer({ companyId, contact, onSent }) {
     return () => doSaveBeacon();
   }, [doSaveBeacon]);
 
-  // Test email countdown timer
-  useEffect(() => {
-    if (testCountdown <= 0) return;
-    const interval = setInterval(() => {
-      setTestCountdown((c) => {
-        if (c <= 1) {
-          clearInterval(interval);
-          return 0;
-        }
-        return c - 1;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [testCountdown]);
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -167,87 +149,27 @@ export default function EmailComposer({ companyId, contact, onSent }) {
     }
 
     setTestRunning(true);
-    setTestStep(1);
+    setStatus({ type: "info", text: "Starting test sequence on server..." });
 
-    // Fetch settings to know sequence length
-    const { fetchSettings } = await import("../api");
-    const settings = await fetchSettings();
-    const totalSteps = settings.sequence_length || 3;
-    setTestTotalSteps(totalSteps);
-
-    // Step 1: Send initial immediately
-    setStatus({ type: "info", text: `Sending initial outreach (1/${totalSteps})...` });
-    doGmailSend(testEmail, true);
-
-    // Steps 2+: Generate and send follow-ups every 3 minutes
-    // Must match the actual sequence from followup_engine.py:
-    // 2 steps: [initial, final]
-    // 3 steps: [initial, follow_up, final]
-    // 4 steps: [initial, follow_up, follow_up_2, final]
-    // 5 steps: [initial, follow_up, follow_up_2, follow_up_3, final]
-    const SEQUENCES = {
-      2: ["final"],
-      3: ["follow_up", "final"],
-      4: ["follow_up", "follow_up_2", "final"],
-      5: ["follow_up", "follow_up_2", "follow_up_3", "final"],
-    };
-    const followUpTypes = SEQUENCES[totalSteps] || SEQUENCES[3];
-
-    const timers = [];
-    followUpTypes.forEach((emailType, idx) => {
-      const delay = (idx + 1) * 180000; // 3 min increments
-      const stepNum = idx + 2;
-      const timer = setTimeout(async () => {
-        setTestStep(stepNum);
-        setStatus({ type: "info", text: `Generating & sending step ${stepNum}/${totalSteps}...` });
-        try {
-          // Generate follow-up with AI
-          const draft = await generateEmail({
-            company_id: companyId,
-            contact_email: contact.email,
-            contact_name: contactName,
-            contact_title: contactTitle,
-            email_type: emailType,
-          });
-          // Send it via backend (uses stored refresh token)
-          const result = await sendEmail({
-            to: testEmail,
-            subject: `[TEST ${stepNum}/${totalSteps}] ${draft.subject}`,
-            body: draft.body,
-            company_id: null,
-            email_type: emailType,
-          });
-          if (result.status === "sent") {
-            setStatus({ type: "success", text: `Step ${stepNum}/${totalSteps} sent! ${stepNum < totalSteps ? `Next in 3 min...` : "Test sequence complete!"}` });
-          }
-          if (stepNum === totalSteps) {
-            setTestRunning(false);
-          }
-        } catch (e) {
-          setStatus({ type: "error", text: `Step ${stepNum} failed: ${e.message}` });
-        }
-      }, delay);
-      timers.push(timer);
-    });
-    setTestTimers(timers);
-
-    // Start countdown for next follow-up
-    setTestCountdown(180);
-  };
-
-  const cancelTest = () => {
-    testTimers.forEach(clearTimeout);
-    setTestTimers([]);
-    setTestRunning(false);
-    setTestStep(0);
-    setTestCountdown(0);
-    setStatus({ type: "info", text: "Test sequence cancelled" });
-  };
-
-  const formatCountdown = (secs) => {
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${m}:${s.toString().padStart(2, "0")}`;
+    try {
+      const result = await startTestSequence({
+        company_id: companyId,
+        contact_email: contact.email,
+        contact_name: contactName,
+        contact_title: contactTitle,
+        test_email: testEmail,
+        subject,
+        body,
+      });
+      setStatus({
+        type: "success",
+        text: `Test sequence started! ${result.total_steps} emails will be sent to ${result.test_email}. Initial sent now, follow-ups every 3 min. You can browse away safely.`,
+      });
+    } catch (e) {
+      setStatus({ type: "error", text: "Failed to start test: " + e.message });
+    } finally {
+      setTestRunning(false);
+    }
   };
 
   if (loadingDraft) return <div className="email-composer"><p>Loading draft...</p></div>;
@@ -317,25 +239,13 @@ export default function EmailComposer({ companyId, contact, onSent }) {
                 className="test-email-input"
                 disabled={testRunning}
               />
-              {testRunning ? (
-                <>
-                  <span className="test-countdown">
-                    Step {testStep}/{testTotalSteps}
-                    {testCountdown > 0 && ` - next in ${formatCountdown(testCountdown)}`}
-                  </span>
-                  <button className="btn btn-cancel-test" onClick={cancelTest}>
-                    Stop
-                  </button>
-                </>
-              ) : (
-                <button
-                  className="btn btn-test"
-                  onClick={handleTestSequence}
-                  disabled={sending || !testEmail.trim() || !subject.trim()}
-                >
-                  Run Test
-                </button>
-              )}
+              <button
+                className="btn btn-test"
+                onClick={handleTestSequence}
+                disabled={testRunning || !testEmail.trim() || !subject.trim()}
+              >
+                {testRunning ? "Starting..." : "Run Test"}
+              </button>
             </div>
           )}
         </div>

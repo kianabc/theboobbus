@@ -139,6 +139,15 @@ export async function saveDraft(companyId, data) {
   return res.json();
 }
 
+export async function startTestSequence(data) {
+  const res = await authFetch(`${API}/api/test-sequence`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
 export async function gmailAuthorize(code, redirectUri) {
   const res = await authFetch(`${API}/api/gmail/authorize`, {
     method: "POST",

@@ -710,6 +710,114 @@ def get_prompts():
 
 # ── Cron: Auto Follow-ups ────────────────────────────────────────────────────
 
+# ── Test Sequence (server-side) ────────────────────────────────────────────────
+
+import threading
+
+
+class TestSequenceRequest(BaseModel):
+    company_id: int
+    contact_email: str
+    contact_name: str | None = None
+    contact_title: str | None = None
+    test_email: str
+    subject: str
+    body: str
+
+
+@app.post("/api/test-sequence")
+def start_test_sequence(req: TestSequenceRequest, request: Request):
+    """Run a test email sequence on the server. Sends initial immediately, follow-ups every 3 min."""
+    from email_generator import generate_outreach_email
+    from followup_engine import get_sequence_length
+    import time as _time
+
+    user = get_current_user(request)
+
+    # Get Gmail token from stored refresh token
+    rs = execute("SELECT refresh_token FROM gmail_tokens WHERE user_email = ?", [user["email"]])
+    if not rs.rows:
+        raise HTTPException(status_code=400, detail="Gmail not connected. Go to Settings first.")
+
+    refresh_token = rs.rows[0][0]
+    seq_length = get_sequence_length()
+
+    # Build sequence types
+    if seq_length == 2:
+        follow_ups = ["final"]
+    else:
+        follow_ups = []
+        for i in range(1, seq_length - 1):
+            follow_ups.append(f"follow_up{'_' + str(i) if i > 1 else ''}")
+        follow_ups.append("final")
+
+    # Get company info
+    company_rs = execute("SELECT name, industry, city FROM companies WHERE id = ?", [req.company_id])
+    if not company_rs.rows:
+        raise HTTPException(status_code=404, detail="Company not found")
+    company = company_rs.rows[0]
+
+    def _get_access_token():
+        import requests as http_requests
+        client_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+        client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
+        resp = http_requests.post("https://oauth2.googleapis.com/token", data={
+            "client_id": client_id, "client_secret": client_secret,
+            "refresh_token": refresh_token, "grant_type": "refresh_token",
+        }, timeout=10)
+        if resp.status_code == 200:
+            return resp.json().get("access_token")
+        return None
+
+    def _send_gmail(access_token, to, subj, body_text):
+        import requests as http_requests
+        import base64
+        from email.mime.text import MIMEText
+        msg = MIMEText(body_text)
+        msg["To"] = to
+        msg["Subject"] = subj
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+        resp = http_requests.post(
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+            json={"raw": raw}, timeout=15,
+        )
+        return resp.status_code == 200
+
+    def run_sequence():
+        # Step 1: Send initial immediately
+        token = _get_access_token()
+        if not token:
+            logger.error("Test sequence: failed to get Gmail token")
+            return
+        _send_gmail(token, req.test_email, f"[TEST 1/{seq_length}] {req.subject}", req.body)
+        logger.info("Test sequence: sent step 1/%d to %s", seq_length, req.test_email)
+
+        # Steps 2+: every 3 minutes
+        for idx, email_type in enumerate(follow_ups):
+            _time.sleep(180)  # 3 minutes
+            step = idx + 2
+            try:
+                draft = generate_outreach_email(
+                    company_name=company[0], company_industry=company[1] or "Unknown",
+                    company_city=company[2] or "Utah", contact_email=req.contact_email,
+                    contact_name=req.contact_name, contact_title=req.contact_title,
+                    email_type=email_type, company_id=req.company_id,
+                )
+                token = _get_access_token()
+                if token:
+                    _send_gmail(token, req.test_email, f"[TEST {step}/{seq_length}] {draft['subject']}", draft["body"])
+                    logger.info("Test sequence: sent step %d/%d to %s", step, seq_length, req.test_email)
+            except Exception as e:
+                logger.error("Test sequence step %d failed: %s", step, e)
+
+    # Run in background thread so the API returns immediately
+    thread = threading.Thread(target=run_sequence, daemon=True)
+    thread.start()
+
+    return {"status": "started", "total_steps": seq_length, "test_email": req.test_email}
+
+
 # ── Gmail OAuth (refresh token) ───────────────────────────────────────────────
 
 class GmailAuthRequest(BaseModel):
