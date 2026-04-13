@@ -161,12 +161,16 @@ export default function EmailComposer({ companyId, contact, onSent }) {
         subject,
         body,
       });
-      setStatus({
-        type: "success",
-        text: `Test sequence started! ${result.total_steps} emails will be sent to ${result.test_email}. Initial sent now, follow-ups every 3 min. You can browse away safely.`,
-      });
+      if (result.status === "started") {
+        setStatus({
+          type: "success",
+          text: `Test sequence started! ${result.total_steps} emails will be sent to ${testEmail}. Initial sent now, follow-ups at configured interval. You can browse away safely.`,
+        });
+      } else {
+        setStatus({ type: "error", text: result.detail || "Failed to start test sequence" });
+      }
     } catch (e) {
-      setStatus({ type: "error", text: "Failed to start test: " + e.message });
+      setStatus({ type: "error", text: "Failed to start test. Is Gmail connected in Settings?" });
     } finally {
       setTestRunning(false);
     }
