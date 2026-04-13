@@ -85,6 +85,15 @@ export async function fetchOutreachHistory(companyId) {
   return res.json();
 }
 
+export async function addContact(companyId, data) {
+  const res = await authFetch(`${API}/api/companies/${companyId}/contacts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
 export async function fetchSettings() {
   const res = await authFetch(`${API}/api/settings`);
   return res.json();

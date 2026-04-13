@@ -136,8 +136,14 @@
 
 .card-url {
   font-size: 13px;
-  color: var(--gray-400);
+  color: var(--primary);
   margin-top: 4px;
+  text-decoration: none;
+  display: block;
+}
+
+.card-url:hover {
+  text-decoration: underline;
 }
 
 .loading,

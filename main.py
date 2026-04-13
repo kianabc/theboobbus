@@ -137,6 +137,36 @@ def add_company(body: CompanyCreate):
     return {"id": r[0], "name": r[1], "website": r[2], "industry": r[3], "city": r[4]}
 
 
+class AddContactRequest(BaseModel):
+    email: str
+    name: str | None = None
+    title: str | None = None
+
+
+@app.post("/api/companies/{company_id}/contacts")
+def add_contact(company_id: int, body: AddContactRequest):
+    """Manually add a contact to a company."""
+    rs = execute("SELECT id FROM companies WHERE id = ?", [company_id])
+    if not rs.rows:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    source = "Manual entry"
+    if body.name or body.title:
+        parts = [p for p in [body.name, body.title] if p]
+        source = f"Manual - {', '.join(parts)}"
+
+    execute(
+        """INSERT INTO hr_emails (company_id, email, source, confidence)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(company_id, email) DO UPDATE SET
+               source = excluded.source,
+               confidence = excluded.confidence,
+               scraped_at = CURRENT_TIMESTAMP""",
+        [company_id, body.email.lower().strip(), source, "high"],
+    )
+    return {"email": body.email.lower().strip(), "confidence": "high", "source": source}
+
+
 @app.post("/api/companies/{company_id}/scrape", response_model=list[HREmailOut])
 def scrape_company_emails(company_id: int):
     """Find HR emails using Hunter.io, Apollo.io, and web scraping."""

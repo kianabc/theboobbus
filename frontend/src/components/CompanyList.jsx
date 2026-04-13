@@ -76,7 +76,15 @@ export default function CompanyList({ onSelect, onAdd }) {
                 <span className="card-city">{c.city}</span>
               </div>
               {c.website && (
-                <p className="card-url">{new URL(c.website).hostname}</p>
+                <a
+                  href={c.website}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="card-url"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {new URL(c.website).hostname}
+                </a>
               )}
             </div>
           ))}

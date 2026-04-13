@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { fetchCompany, scrapeCompany, fetchOutreachHistory } from "../api";
+import { fetchCompany, scrapeCompany, fetchOutreachHistory, addContact } from "../api";
 import EmailComposer from "./EmailComposer";
 import "./CompanyDetail.css";
 
@@ -9,6 +9,9 @@ export default function CompanyDetail({ companyId, onBack }) {
   const [scrapeResult, setScrapeResult] = useState(null);
   const [composingFor, setComposingFor] = useState(null);
   const [outreach, setOutreach] = useState([]);
+  const [showAddContact, setShowAddContact] = useState(false);
+  const [newContact, setNewContact] = useState({ email: "", name: "", title: "" });
+  const [addingContact, setAddingContact] = useState(false);
 
   const load = () => {
     fetchCompany(companyId).then(setCompany);
@@ -73,8 +76,51 @@ export default function CompanyDetail({ companyId, onBack }) {
         >
           {scraping ? "Finding contacts..." : "Find HR Contacts"}
         </button>
+        <button
+          className="btn btn-secondary"
+          onClick={() => setShowAddContact(!showAddContact)}
+        >
+          {showAddContact ? "Cancel" : "+ Add Contact"}
+        </button>
         {scrapeResult && <span className="scrape-result">{scrapeResult}</span>}
       </div>
+
+      {showAddContact && (
+        <div className="add-contact-form">
+          <input
+            type="email"
+            placeholder="Email address *"
+            value={newContact.email}
+            onChange={(e) => setNewContact({ ...newContact, email: e.target.value })}
+          />
+          <input
+            type="text"
+            placeholder="Name (optional)"
+            value={newContact.name}
+            onChange={(e) => setNewContact({ ...newContact, name: e.target.value })}
+          />
+          <input
+            type="text"
+            placeholder="Job title (optional)"
+            value={newContact.title}
+            onChange={(e) => setNewContact({ ...newContact, title: e.target.value })}
+          />
+          <button
+            className="btn btn-primary"
+            disabled={!newContact.email.trim() || addingContact}
+            onClick={async () => {
+              setAddingContact(true);
+              await addContact(companyId, newContact);
+              setNewContact({ email: "", name: "", title: "" });
+              setShowAddContact(false);
+              setAddingContact(false);
+              load();
+            }}
+          >
+            {addingContact ? "Adding..." : "Add Contact"}
+          </button>
+        </div>
+      )}
 
       <div className="emails-section">
         <h3>HR Contacts ({company.hr_emails.length})</h3>
