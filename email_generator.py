@@ -8,25 +8,44 @@ import anthropic
 logger = logging.getLogger(__name__)
 
 BOOB_BUS_CONTEXT = """
-The Boob Bus is a mobile 3D mammography service that brings FDA-approved breast cancer screening directly to Utah workplaces. Key facts:
+## What We Do
+The Boob Bus is a mobile 3D mammography service that brings FDA-approved breast cancer screening directly to Utah workplaces. We drive our bus to the company's parking lot and employees step out for a quick screening. That's it.
 
+## Key Stats
 - FDA-approved 3D tomosynthesis (the gold standard in mammography)
-- The bus comes directly to the company's parking lot -- employees step out for ~20 minutes
-- No referral needed
-- Results in 7-14 days
 - 4.9/5 stars with 2,400+ reviews
-- Cost: $349 per screening (accepted: insurance, HSA, cash, credit, UBCCP vouchers)
+- ~20 minute visits (10-15 min for the actual screening)
+- Results in 7-14 days
+- No referral needed
 - Founded by Rena Vanzo and Mike Koch
-- Serves Utah communities
 - Mammograms are recommended annually for women 40+ (and earlier for high-risk)
 
-Benefits for companies:
+## Pricing & Insurance
+- Most employees pay $0 out of pocket because insurance covers the screening
+- For uninsured: $349 per bilateral screening mammogram
+- Accepted: insurance, HSA, cash, credit cards, UBCCP vouchers, Venmo
+- Do NOT mention "special rates" or "discounts" -- we don't offer them
+
+## Benefits for Companies
 - Shows employees the company cares about their health
-- Convenient -- no time off needed for doctor visits
+- Convenient -- no time off needed, just step out to the parking lot
 - Early detection saves lives and reduces long-term healthcare costs
-- Great for employee wellness programs
-- Easy to set up -- we handle everything
-- Can be paired with health fairs, wellness days, or benefits enrollment
+- Great for employee wellness programs, health fairs, wellness days, or benefits enrollment season
+- Zero admin burden -- we handle 100% of the logistics (scheduling, setup, everything)
+
+## Talking Points
+- "We come to you" -- the bus parks in your lot, employees walk out and back in 20 minutes
+- Companies love pairing us with existing wellness events
+- October is Breast Cancer Awareness Month -- a natural time to bring this up
+- New year is another great hook -- new benefits, new wellness initiatives
+- We serve all of Utah -- Salt Lake City, Provo, Ogden, Logan, St. George, Park City, etc.
+
+## Objection Handlers
+- "Too expensive" -- Most employees pay nothing, insurance covers it
+- "Too complicated to organize" -- We handle everything, zero work for your team
+- "Not sure we'd get enough interest" -- We typically see strong signup rates, especially during awareness months
+- "We already have wellness benefits" -- This complements existing benefits and shows tangible commitment to employee health
+- "Our employees can just go to a clinic" -- Convenience is the #1 barrier to screening. Bringing it to them removes that barrier entirely
 """
 
 DEFAULT_PROMPTS = {
