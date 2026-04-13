@@ -149,13 +149,18 @@ export default function EmailComposer({ companyId, contact, onSent }) {
     doGmailSend(testEmail, true);
 
     // Steps 2+: Generate and send follow-ups every 3 minutes
-    const followUpTypes = [];
-    if (totalSteps === 2) {
-      followUpTypes.push("final");
-    } else {
-      for (let i = 1; i < totalSteps - 1; i++) followUpTypes.push("follow_up");
-      followUpTypes.push("final");
-    }
+    // Must match the actual sequence from followup_engine.py:
+    // 2 steps: [initial, final]
+    // 3 steps: [initial, follow_up, final]
+    // 4 steps: [initial, follow_up, follow_up_2, final]
+    // 5 steps: [initial, follow_up, follow_up_2, follow_up_3, final]
+    const SEQUENCES = {
+      2: ["final"],
+      3: ["follow_up", "final"],
+      4: ["follow_up", "follow_up_2", "final"],
+      5: ["follow_up", "follow_up_2", "follow_up_3", "final"],
+    };
+    const followUpTypes = SEQUENCES[totalSteps] || SEQUENCES[3];
 
     const timers = [];
     followUpTypes.forEach((emailType, idx) => {
