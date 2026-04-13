@@ -354,6 +354,25 @@ def get_outreach_history(company_id: int):
 class SettingsUpdate(BaseModel):
     follow_up_days: int | None = None
     sequence_length: int | None = None
+    hunter_enabled: bool | None = None
+    hunter_api_key: str | None = None
+    apollo_enabled: bool | None = None
+    apollo_api_key: str | None = None
+    scraping_enabled: bool | None = None
+    anthropic_api_key: str | None = None
+
+
+def _get_setting(key: str, default: str = "") -> str:
+    rs = execute("SELECT value FROM settings WHERE key = ?", [key])
+    return rs.rows[0][0] if rs.rows else default
+
+
+def _set_setting(key: str, value: str):
+    execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        [key, value],
+    )
 
 
 @app.get("/api/settings")
@@ -363,6 +382,12 @@ def get_settings():
     return {
         "follow_up_days": get_follow_up_days(),
         "sequence_length": get_sequence_length(),
+        "hunter_enabled": _get_setting("hunter_enabled", "true") == "true",
+        "hunter_api_key": _get_setting("hunter_api_key") or os.environ.get("HUNTER_API_KEY", ""),
+        "apollo_enabled": _get_setting("apollo_enabled", "true") == "true",
+        "apollo_api_key": _get_setting("apollo_api_key") or os.environ.get("APOLLO_API_KEY", ""),
+        "scraping_enabled": _get_setting("scraping_enabled", "true") == "true",
+        "anthropic_api_key": _get_setting("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY", ""),
     }
 
 
@@ -378,6 +403,18 @@ def update_settings(body: SettingsUpdate):
         if body.sequence_length < 2 or body.sequence_length > 5:
             raise HTTPException(status_code=400, detail="Sequence length must be between 2 and 5")
         set_sequence_length(body.sequence_length)
+    if body.hunter_enabled is not None:
+        _set_setting("hunter_enabled", "true" if body.hunter_enabled else "false")
+    if body.hunter_api_key is not None:
+        _set_setting("hunter_api_key", body.hunter_api_key)
+    if body.apollo_enabled is not None:
+        _set_setting("apollo_enabled", "true" if body.apollo_enabled else "false")
+    if body.apollo_api_key is not None:
+        _set_setting("apollo_api_key", body.apollo_api_key)
+    if body.scraping_enabled is not None:
+        _set_setting("scraping_enabled", "true" if body.scraping_enabled else "false")
+    if body.anthropic_api_key is not None:
+        _set_setting("anthropic_api_key", body.anthropic_api_key)
     return get_settings()
 
 
@@ -432,18 +469,36 @@ def get_boobbus_info():
 
 
 class BoobBusInfoUpdate(BaseModel):
-    info: str
+    info: str | None = None
+    prompts: dict | None = None
 
 
 @app.put("/api/boobbus-info-update")
 def update_boobbus_info_v2(body: BoobBusInfoUpdate):
-    """Update the Boob Bus context."""
-    execute(
-        "INSERT INTO settings (key, value) VALUES ('boobbus_info', ?) "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        [body.info],
-    )
-    return {"info": body.info}
+    """Update the Boob Bus context and/or email prompts."""
+    result = {}
+
+    if body.info is not None:
+        _set_setting("boobbus_info", body.info)
+        result["info"] = body.info
+
+    if body.prompts is not None:
+        for key, value in body.prompts.items():
+            if key in ("initial", "follow_up", "follow_up_2", "follow_up_3", "final"):
+                _set_setting(f"prompt_{key}", value)
+        result["prompts"] = body.prompts
+
+    return result
+
+
+@app.get("/api/prompts")
+def get_prompts():
+    """Get all email prompt templates."""
+    from email_generator import get_all_prompts, DEFAULT_PROMPTS
+    return {
+        "prompts": get_all_prompts(),
+        "defaults": DEFAULT_PROMPTS,
+    }
 
 
 # ── Cron: Auto Follow-ups ────────────────────────────────────────────────────

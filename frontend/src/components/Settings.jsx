@@ -10,28 +10,22 @@ const STEP_LABELS = {
 };
 
 export default function Settings({ onBack }) {
-  const [followUpDays, setFollowUpDays] = useState(5);
-  const [sequenceLength, setSequenceLength] = useState(3);
+  const [settings, setSettings] = useState(null);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchSettings().then((data) => {
-      setFollowUpDays(data.follow_up_days);
-      setSequenceLength(data.sequence_length);
-      setLoading(false);
-    });
+    fetchSettings().then(setSettings);
   }, []);
+
+  const update = (key, value) => setSettings((s) => ({ ...s, [key]: value }));
 
   const handleSave = async () => {
     setSaving(true);
     setStatus(null);
     try {
-      await updateSettings({
-        follow_up_days: followUpDays,
-        sequence_length: sequenceLength,
-      });
+      const result = await updateSettings(settings);
+      setSettings(result);
       setStatus({ type: "success", text: "Settings saved" });
     } catch {
       setStatus({ type: "error", text: "Failed to save" });
@@ -40,9 +34,9 @@ export default function Settings({ onBack }) {
     }
   };
 
-  const labels = STEP_LABELS[sequenceLength] || STEP_LABELS[3];
+  if (!settings) return <div className="loading">Loading settings...</div>;
 
-  if (loading) return <div className="loading">Loading settings...</div>;
+  const labels = STEP_LABELS[settings.sequence_length] || STEP_LABELS[3];
 
   return (
     <div className="settings">
@@ -50,12 +44,11 @@ export default function Settings({ onBack }) {
         &larr; Back to dashboard
       </button>
 
+      {/* ── Follow-up Settings ── */}
       <div className="settings-card">
         <h2>Follow-up Settings</h2>
         <p className="settings-desc">
-          Configure automatic follow-up behavior. When you send an outreach email,
-          the system will check for replies and automatically send follow-ups if
-          no response is received.
+          Configure automatic follow-up behavior when no reply is received.
         </p>
 
         <div className="settings-field">
@@ -65,8 +58,8 @@ export default function Settings({ onBack }) {
               type="number"
               min="1"
               max="30"
-              value={followUpDays}
-              onChange={(e) => setFollowUpDays(parseInt(e.target.value) || 5)}
+              value={settings.follow_up_days}
+              onChange={(e) => update("follow_up_days", parseInt(e.target.value) || 5)}
             />
             <span className="settings-hint">days between each email</span>
           </div>
@@ -76,8 +69,8 @@ export default function Settings({ onBack }) {
           <label>Emails in sequence</label>
           <div className="settings-input-row">
             <select
-              value={sequenceLength}
-              onChange={(e) => setSequenceLength(parseInt(e.target.value))}
+              value={settings.sequence_length}
+              onChange={(e) => update("sequence_length", parseInt(e.target.value))}
               className="settings-select"
             >
               <option value={2}>2 emails (initial + final)</option>
@@ -97,9 +90,7 @@ export default function Settings({ onBack }) {
                 <div className="sequence-step">
                   <span className="step-num">{i + 1}</span>
                   <span className="step-label">{label}</span>
-                  <span className="step-timing">
-                    Day {i * followUpDays}
-                  </span>
+                  <span className="step-timing">Day {i * settings.follow_up_days}</span>
                 </div>
               </div>
             ))}
@@ -109,21 +100,116 @@ export default function Settings({ onBack }) {
             </div>
           </div>
         </div>
+      </div>
 
-        <div className="settings-actions">
-          <button
-            className="btn btn-primary"
-            onClick={handleSave}
-            disabled={saving}
-          >
-            {saving ? "Saving..." : "Save Settings"}
-          </button>
-          {status && (
-            <span className={`settings-status ${status.type}`}>
-              {status.text}
-            </span>
+      {/* ── Data Sources ── */}
+      <div className="settings-card">
+        <h2>Contact Finding Sources</h2>
+        <p className="settings-desc">
+          Enable or disable data sources used when finding HR contacts.
+          Add your API keys here or use the ones from environment variables.
+        </p>
+
+        <div className="source-item">
+          <div className="source-header">
+            <label className="toggle-label">
+              <input
+                type="checkbox"
+                checked={settings.hunter_enabled}
+                onChange={(e) => update("hunter_enabled", e.target.checked)}
+              />
+              <span className="toggle-name">Hunter.io</span>
+            </label>
+            <span className="source-desc">Find emails by company domain + verify patterns</span>
+          </div>
+          {settings.hunter_enabled && (
+            <div className="source-config">
+              <input
+                type="password"
+                placeholder="Hunter.io API Key"
+                value={settings.hunter_api_key}
+                onChange={(e) => update("hunter_api_key", e.target.value)}
+                className="api-key-input"
+              />
+              <span className="settings-hint">Leave blank to use environment variable</span>
+            </div>
           )}
         </div>
+
+        <div className="source-item">
+          <div className="source-header">
+            <label className="toggle-label">
+              <input
+                type="checkbox"
+                checked={settings.apollo_enabled}
+                onChange={(e) => update("apollo_enabled", e.target.checked)}
+              />
+              <span className="toggle-name">Apollo.io</span>
+            </label>
+            <span className="source-desc">Find HR people by job title at companies</span>
+          </div>
+          {settings.apollo_enabled && (
+            <div className="source-config">
+              <input
+                type="password"
+                placeholder="Apollo.io API Key"
+                value={settings.apollo_api_key}
+                onChange={(e) => update("apollo_api_key", e.target.value)}
+                className="api-key-input"
+              />
+              <span className="settings-hint">Leave blank to use environment variable</span>
+            </div>
+          )}
+        </div>
+
+        <div className="source-item">
+          <div className="source-header">
+            <label className="toggle-label">
+              <input
+                type="checkbox"
+                checked={settings.scraping_enabled}
+                onChange={(e) => update("scraping_enabled", e.target.checked)}
+              />
+              <span className="toggle-name">Web Scraping</span>
+            </label>
+            <span className="source-desc">Crawl company websites for email addresses (no API key needed)</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── AI API Key ── */}
+      <div className="settings-card">
+        <h2>AI Email Generation</h2>
+        <p className="settings-desc">
+          API key for Claude AI, used to generate personalized outreach emails.
+        </p>
+
+        <div className="source-item">
+          <div className="source-header">
+            <span className="toggle-name">Claude API (Anthropic)</span>
+            <span className="source-desc">Powers all AI-generated email drafts</span>
+          </div>
+          <div className="source-config">
+            <input
+              type="password"
+              placeholder="Anthropic API Key (sk-ant-...)"
+              value={settings.anthropic_api_key}
+              onChange={(e) => update("anthropic_api_key", e.target.value)}
+              className="api-key-input"
+            />
+            <span className="settings-hint">Leave blank to use environment variable</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Save ── */}
+      <div className="settings-actions">
+        <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+          {saving ? "Saving..." : "Save All Settings"}
+        </button>
+        {status && (
+          <span className={`settings-status ${status.type}`}>{status.text}</span>
+        )}
       </div>
     </div>
   );

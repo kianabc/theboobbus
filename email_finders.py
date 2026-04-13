@@ -33,12 +33,24 @@ def _domain_from_url(website: str) -> str | None:
     return domain if domain else None
 
 
+def _db_setting(key: str, default: str = "") -> str:
+    try:
+        from database import execute
+        rs = execute("SELECT value FROM settings WHERE key = ?", [key])
+        return rs.rows[0][0] if rs.rows else default
+    except Exception:
+        return default
+
+
 def search_hunter(website: str) -> list[dict]:
     """Use Hunter.io to find HR-related emails for a company domain.
 
     Returns list of {"email", "confidence", "source"}
     """
-    api_key = os.environ.get("HUNTER_API_KEY", "").strip()
+    if _db_setting("hunter_enabled", "true") == "false":
+        return []
+    # Check DB first, then env var
+    api_key = _db_setting("hunter_api_key") or os.environ.get("HUNTER_API_KEY", "").strip()
     if not api_key:
         logger.warning("HUNTER_API_KEY not set, skipping Hunter.io")
         return []
@@ -136,7 +148,9 @@ def search_apollo(company_name: str, website: str) -> list[dict]:
 
     Returns list of {"email", "confidence", "source"}
     """
-    api_key = os.environ.get("APOLLO_API_KEY", "").strip()
+    if _db_setting("apollo_enabled", "true") == "false":
+        return []
+    api_key = _db_setting("apollo_api_key") or os.environ.get("APOLLO_API_KEY", "").strip()
     if not api_key:
         logger.warning("APOLLO_API_KEY not set, skipping Apollo.io")
         return []
@@ -229,9 +243,10 @@ def find_hr_emails(company_name: str, website: str) -> list[dict]:
             all_results[email] = item
 
     # 3. Website scraping (fallback)
-    for item in scrape_company(website):
-        email = item["email"]
-        if email not in all_results or _confidence_rank(item["confidence"]) > _confidence_rank(all_results[email]["confidence"]):
-            all_results[email] = item
+    if _db_setting("scraping_enabled", "true") != "false":
+        for item in scrape_company(website):
+            email = item["email"]
+            if email not in all_results or _confidence_rank(item["confidence"]) > _confidence_rank(all_results[email]["confidence"]):
+                all_results[email] = item
 
     return sorted(all_results.values(), key=lambda r: _confidence_rank(r["confidence"]), reverse=True)

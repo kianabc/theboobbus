@@ -11,7 +11,7 @@ BOOB_BUS_CONTEXT = """
 The Boob Bus is a mobile 3D mammography service that brings FDA-approved breast cancer screening directly to Utah workplaces. Key facts:
 
 - FDA-approved 3D tomosynthesis (the gold standard in mammography)
-- The bus comes directly to the company's parking lot — employees step out for ~20 minutes
+- The bus comes directly to the company's parking lot -- employees step out for ~20 minutes
 - No referral needed
 - Results in 7-14 days
 - 4.9/5 stars with 2,400+ reviews
@@ -22,51 +22,15 @@ The Boob Bus is a mobile 3D mammography service that brings FDA-approved breast 
 
 Benefits for companies:
 - Shows employees the company cares about their health
-- Convenient — no time off needed for doctor visits
+- Convenient -- no time off needed for doctor visits
 - Early detection saves lives and reduces long-term healthcare costs
 - Great for employee wellness programs
-- Easy to set up — we handle everything
+- Easy to set up -- we handle everything
 - Can be paired with health fairs, wellness days, or benefits enrollment
 """
 
-
-def generate_outreach_email(
-    company_name: str,
-    company_industry: str,
-    company_city: str,
-    contact_email: str,
-    contact_name: str | None = None,
-    contact_title: str | None = None,
-    email_type: str = "initial",
-) -> dict:
-    """Generate a personalized outreach email using Claude.
-
-    Args:
-        company_name: Target company
-        company_industry: Company's industry
-        company_city: Company location
-        contact_email: Recipient email
-        contact_name: Recipient name (if known)
-        contact_title: Recipient job title (if known)
-        email_type: "initial", "follow_up", or "final"
-
-    Returns:
-        {"subject": str, "body": str}
-    """
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    if not api_key:
-        raise ValueError("ANTHROPIC_API_KEY not configured")
-
-    client = anthropic.Anthropic(api_key=api_key)
-
-    contact_info = contact_email
-    if contact_name:
-        contact_info = f"{contact_name} ({contact_email})"
-    if contact_title:
-        contact_info += f", {contact_title}"
-
-    if email_type == "initial":
-        prompt = f"""Write a short, warm, professional outreach email to pitch The Boob Bus mobile mammography service to this company.
+DEFAULT_PROMPTS = {
+    "initial": """Write a short, warm, professional outreach email to pitch The Boob Bus mobile mammography service to this company.
 
 Target: {contact_info}
 Company: {company_name}
@@ -81,10 +45,9 @@ Guidelines:
 - End with a clear, low-pressure call to action (suggest a quick call or reply)
 - Don't use exclamation marks excessively
 - Sign off as the Boob Bus team
-- If you know the contact's name, use it. If not, use a warm generic greeting."""
+- If you know the contact's name, use it. If not, use a warm generic greeting.""",
 
-    elif email_type == "follow_up":
-        prompt = f"""Write a brief follow-up email for The Boob Bus mobile mammography service. This is a follow-up to an initial outreach that got no response.
+    "follow_up": """Write a brief follow-up email for The Boob Bus mobile mammography service. This is a follow-up to an initial outreach that got no response.
 
 Target: {contact_info}
 Company: {company_name}
@@ -96,11 +59,38 @@ Guidelines:
 - Reference that you reached out before
 - Add one new angle or benefit not in a typical first email
 - Mention a specific upcoming availability or seasonal relevance (e.g., Breast Cancer Awareness Month, new year wellness programs, spring health fairs)
-- Keep it light — no guilt or pressure
-- End with a simple question to prompt a reply"""
+- Keep it light, no guilt or pressure
+- End with a simple question to prompt a reply""",
 
-    elif email_type == "final":
-        prompt = f"""Write a final check-in email for The Boob Bus mobile mammography service. This is the last follow-up after no response to previous emails.
+    "follow_up_2": """Write a second follow-up email for The Boob Bus mobile mammography service. The recipient hasn't responded to two previous emails.
+
+Target: {contact_info}
+Company: {company_name}
+Industry: {company_industry}
+City: {company_city}
+
+Guidelines:
+- Keep it under 100 words
+- Don't repeat the same points from earlier emails
+- Try a completely different angle (e.g., a success story, a statistic about early detection, or a limited-time offer)
+- Very casual and friendly tone
+- End with an easy yes/no question""",
+
+    "follow_up_3": """Write a third follow-up email for The Boob Bus mobile mammography service. This is a late-stage follow-up after multiple emails with no response.
+
+Target: {contact_info}
+Company: {company_name}
+Industry: {company_industry}
+City: {company_city}
+
+Guidelines:
+- Keep it under 80 words
+- Ultra brief and friendly
+- Share one compelling stat or testimonial
+- Make it feel like a quick note, not a formal email
+- End with a simple one-line ask""",
+
+    "final": """Write a final check-in email for The Boob Bus mobile mammography service. This is the last follow-up after no response to previous emails.
 
 Target: {contact_info}
 Company: {company_name}
@@ -113,15 +103,81 @@ Guidelines:
 - Acknowledge they're busy
 - Leave the door open without pressure
 - Mention you won't follow up again unless they're interested
-- Make it easy to say yes with a one-line reply"""
+- Make it easy to say yes with a one-line reply""",
+}
 
-    else:
-        raise ValueError(f"Unknown email_type: {email_type}")
+# Mapping from sequence step names to prompt keys
+STEP_TO_PROMPT_KEY = {
+    "initial": "initial",
+    "follow_up": "follow_up",
+    "follow_up_1": "follow_up",
+    "follow_up_2": "follow_up_2",
+    "follow_up_3": "follow_up_3",
+    "final": "final",
+}
 
-    # Use custom info from database if available, otherwise default
-    from database import execute as db_execute
-    rs = db_execute("SELECT value FROM settings WHERE key = 'boobbus_info'")
-    context = rs.rows[0][0] if rs.rows else BOOB_BUS_CONTEXT
+
+def _get_db_setting(key, default=""):
+    try:
+        from database import execute as db_execute
+        rs = db_execute("SELECT value FROM settings WHERE key = ?", [key])
+        return rs.rows[0][0] if rs.rows else default
+    except Exception:
+        return default
+
+
+def get_prompt(email_type: str) -> str:
+    """Get the prompt template for an email type, checking DB first."""
+    prompt_key = STEP_TO_PROMPT_KEY.get(email_type, email_type)
+    db_key = f"prompt_{prompt_key}"
+    custom = _get_db_setting(db_key)
+    if custom:
+        return custom
+    return DEFAULT_PROMPTS.get(prompt_key, DEFAULT_PROMPTS["follow_up"])
+
+
+def get_all_prompts() -> dict:
+    """Get all prompt templates (custom or default)."""
+    result = {}
+    for key in DEFAULT_PROMPTS:
+        custom = _get_db_setting(f"prompt_{key}")
+        result[key] = custom if custom else DEFAULT_PROMPTS[key]
+    return result
+
+
+def generate_outreach_email(
+    company_name: str,
+    company_industry: str,
+    company_city: str,
+    contact_email: str,
+    contact_name: str | None = None,
+    contact_title: str | None = None,
+    email_type: str = "initial",
+) -> dict:
+    """Generate a personalized outreach email using Claude."""
+    api_key = _get_db_setting("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        raise ValueError("ANTHROPIC_API_KEY not configured")
+
+    client = anthropic.Anthropic(api_key=api_key)
+
+    contact_info = contact_email
+    if contact_name:
+        contact_info = f"{contact_name} ({contact_email})"
+    if contact_title:
+        contact_info += f", {contact_title}"
+
+    # Get the prompt template and fill in variables
+    prompt_template = get_prompt(email_type)
+    prompt = prompt_template.format(
+        contact_info=contact_info,
+        company_name=company_name,
+        company_industry=company_industry,
+        company_city=company_city,
+    )
+
+    # Use custom Boob Bus info from database if available
+    context = _get_db_setting("boobbus_info") or BOOB_BUS_CONTEXT
 
     message = client.messages.create(
         model="claude-sonnet-4-20250514",
@@ -129,6 +185,10 @@ Guidelines:
         system=f"""You are writing outreach emails on behalf of The Boob Bus, a mobile mammography service in Utah.
 
 {context}
+
+IMPORTANT FORMATTING RULES:
+- NEVER use em-dashes or en-dashes (-- or the unicode characters). Use commas, periods, or "and" instead.
+- Keep punctuation simple and clean.
 
 Return ONLY the email in this exact format:
 Subject: [subject line here]
@@ -141,13 +201,20 @@ Do not include any other text, explanation, or commentary.""",
 
     # Parse subject and body from response
     text = message.content[0].text.strip()
-    lines = text.split("\n", 1)
 
+    # Post-processing: remove any em-dashes or en-dashes that slipped through
+    text = text.replace("\u2014", ", ").replace("\u2013", "-").replace(" -- ", ", ")
+
+    lines = text.split("\n", 1)
     subject = ""
     body = text
 
     if lines[0].lower().startswith("subject:"):
         subject = lines[0].replace("Subject:", "").replace("subject:", "").strip()
         body = lines[1].strip() if len(lines) > 1 else ""
+
+    # Clean dashes from subject too
+    subject = subject.replace("\u2014", ", ").replace("\u2013", "-")
+    body = body.replace("\u2014", ", ").replace("\u2013", "-")
 
     return {"subject": subject, "body": body}
