@@ -124,65 +124,83 @@ export default function CompanyDetail({ companyId, onBack }) {
 
       <div className="emails-section">
         <h3>HR Contacts ({company.hr_emails.length})</h3>
-        {company.hr_emails.length === 0 ? (
-          <p className="no-emails">
-            No contacts found yet. Click "Find HR Contacts" to search for
-            decision makers at this company.
-          </p>
-        ) : (
-          <>
+        {(() => {
+          // Build set of emails we've already contacted
+          const contactedEmails = new Set(outreach.map((o) => o.to_email));
+
+          return company.hr_emails.length === 0 ? (
+            <p className="no-emails">
+              No contacts found yet. Click "Find HR Contacts" to search for
+              decision makers at this company.
+            </p>
+          ) : (
             <table className="email-table">
               <thead>
                 <tr>
                   <th>Email</th>
                   <th>Confidence</th>
                   <th>Source</th>
+                  <th>Status</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {company.hr_emails.map((e, i) => (
-                  <>
-                    <tr key={i}>
-                      <td>
-                        <a href={`mailto:${e.email}`} className="email-link">
-                          {e.email}
-                        </a>
-                      </td>
-                      <td>
-                        <span className={`badge badge-${e.confidence}`}>
-                          {e.confidence}
-                        </span>
-                      </td>
-                      <td className="source-cell">{e.source}</td>
-                      <td>
-                        <button
-                          className="btn btn-compose"
-                          onClick={() =>
-                            setComposingFor(composingFor === i ? null : i)
-                          }
-                        >
-                          {composingFor === i ? "Close" : "Compose"}
-                        </button>
-                      </td>
-                    </tr>
-                    {composingFor === i && (
-                      <tr key={`composer-${i}`}>
-                        <td colSpan={4} className="composer-cell">
-                          <EmailComposer
-                            companyId={companyId}
-                            contact={e}
-                            onSent={load}
-                          />
+                {company.hr_emails.map((e, i) => {
+                  const contacted = contactedEmails.has(e.email);
+                  return (
+                    <>
+                      <tr key={i}>
+                        <td>
+                          <a href={`mailto:${e.email}`} className="email-link">
+                            {e.email}
+                          </a>
+                        </td>
+                        <td>
+                          <span className={`badge badge-${e.confidence}`}>
+                            {e.confidence}
+                          </span>
+                        </td>
+                        <td className="source-cell">{e.source}</td>
+                        <td>
+                          {contacted ? (
+                            <span className="badge badge-contacted">Contacted</span>
+                          ) : (
+                            <span className="badge badge-not-contacted">Not contacted</span>
+                          )}
+                        </td>
+                        <td>
+                          {contacted ? (
+                            <span className="contacted-check" title="Already in outreach sequence">Sent</span>
+                          ) : (
+                            <button
+                              className="btn btn-compose"
+                              onClick={() =>
+                                setComposingFor(composingFor === i ? null : i)
+                              }
+                            >
+                              {composingFor === i ? "Close" : "Compose"}
+                            </button>
+                          )}
                         </td>
                       </tr>
-                    )}
-                  </>
-                ))}
+                      {composingFor === i && !contacted && (
+                        <tr key={`composer-${i}`}>
+                          <td colSpan={5} className="composer-cell">
+                            <EmailComposer
+                              companyId={companyId}
+                              contact={e}
+                              onSent={load}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  );
+                })}
               </tbody>
             </table>
-          </>
-        )}
+          );
+        })()}
       </div>
 
       {outreach.length > 0 && (

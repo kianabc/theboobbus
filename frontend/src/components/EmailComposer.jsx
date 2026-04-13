@@ -7,7 +7,6 @@ const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 export default function EmailComposer({ companyId, contact, onSent }) {
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
-  const [emailType, setEmailType] = useState("initial");
   const [generating, setGenerating] = useState(false);
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState(null);
@@ -25,7 +24,7 @@ export default function EmailComposer({ companyId, contact, onSent }) {
         contact_email: contact.email,
         contact_name: contactName,
         contact_title: contactTitle,
-        email_type: emailType,
+        email_type: "initial",
       });
       setSubject(result.subject || "");
       setBody(result.body || "");
@@ -64,7 +63,7 @@ export default function EmailComposer({ companyId, contact, onSent }) {
                 subject,
                 body,
                 company_id: companyId,
-                email_type: emailType,
+                email_type: "initial",
               },
               tokenResponse.access_token
             );
@@ -98,15 +97,6 @@ export default function EmailComposer({ companyId, contact, onSent }) {
       </div>
 
       <div className="composer-controls">
-        <select
-          value={emailType}
-          onChange={(e) => setEmailType(e.target.value)}
-          className="type-select"
-        >
-          <option value="initial">Initial Outreach</option>
-          <option value="follow_up">Follow-up</option>
-          <option value="final">Final Check-in</option>
-        </select>
         <button
           className="btn btn-generate"
           onClick={handleGenerate}
