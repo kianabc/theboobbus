@@ -7,7 +7,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -352,24 +352,98 @@ def get_outreach_history(company_id: int):
 # ── Settings ──────────────────────────────────────────────────────────────────
 
 class SettingsUpdate(BaseModel):
-    follow_up_days: int
+    follow_up_days: int | None = None
+    sequence_length: int | None = None
 
 
 @app.get("/api/settings")
 def get_settings():
     """Get app settings."""
-    from followup_engine import get_follow_up_days
-    return {"follow_up_days": get_follow_up_days()}
+    from followup_engine import get_follow_up_days, get_sequence_length
+    return {
+        "follow_up_days": get_follow_up_days(),
+        "sequence_length": get_sequence_length(),
+    }
 
 
 @app.put("/api/settings")
 def update_settings(body: SettingsUpdate):
     """Update app settings."""
-    from followup_engine import set_follow_up_days
-    if body.follow_up_days < 1 or body.follow_up_days > 30:
-        raise HTTPException(status_code=400, detail="Follow-up days must be between 1 and 30")
-    set_follow_up_days(body.follow_up_days)
-    return {"follow_up_days": body.follow_up_days}
+    from followup_engine import set_follow_up_days, set_sequence_length
+    if body.follow_up_days is not None:
+        if body.follow_up_days < 1 or body.follow_up_days > 30:
+            raise HTTPException(status_code=400, detail="Follow-up days must be between 1 and 30")
+        set_follow_up_days(body.follow_up_days)
+    if body.sequence_length is not None:
+        if body.sequence_length < 2 or body.sequence_length > 5:
+            raise HTTPException(status_code=400, detail="Sequence length must be between 2 and 5")
+        set_sequence_length(body.sequence_length)
+    return get_settings()
+
+
+# ── Activity Tracker ──────────────────────────────────────────────────────────
+
+@app.get("/api/activity")
+def get_activity():
+    """Get all outreach activity across all companies."""
+    rs = execute(
+        """SELECT se.id, se.company_id, c.name as company_name, c.industry,
+                  se.to_email, se.subject, se.email_type, se.replied,
+                  se.sent_by, se.sent_at, se.next_follow_up_at
+           FROM sent_emails se
+           JOIN companies c ON c.id = se.company_id
+           ORDER BY se.sent_at DESC""",
+    )
+    return [{
+        "id": r[0], "company_id": r[1], "company_name": r[2], "industry": r[3],
+        "to_email": r[4], "subject": r[5], "email_type": r[6], "replied": bool(r[7]),
+        "sent_by": r[8], "sent_at": r[9], "next_follow_up_at": r[10],
+    } for r in rs.rows]
+
+
+@app.get("/api/activity/unreached")
+def get_unreached_companies():
+    """Get companies that have emails found but no outreach started."""
+    rs = execute(
+        """SELECT c.id, c.name, c.industry, c.city, COUNT(e.id) as email_count
+           FROM companies c
+           JOIN hr_emails e ON e.company_id = c.id
+           LEFT JOIN sent_emails se ON se.company_id = c.id
+           WHERE se.id IS NULL
+           GROUP BY c.id
+           ORDER BY email_count DESC""",
+    )
+    return [{
+        "id": r[0], "name": r[1], "industry": r[2], "city": r[3], "email_count": r[4],
+    } for r in rs.rows]
+
+
+# ── Boob Bus Info (editable context for AI emails) ───────────────────────────
+
+@app.get("/api/boobbus-info")
+def get_boobbus_info():
+    """Get the Boob Bus context used for AI email generation."""
+    rs = execute("SELECT value FROM settings WHERE key = 'boobbus_info'")
+    if rs.rows:
+        return {"info": rs.rows[0][0]}
+    # Return the default hardcoded info
+    from email_generator import BOOB_BUS_CONTEXT
+    return {"info": BOOB_BUS_CONTEXT.strip()}
+
+
+class BoobBusInfoUpdate(BaseModel):
+    info: str
+
+
+@app.put("/api/boobbus-info-update")
+def update_boobbus_info_v2(body: BoobBusInfoUpdate):
+    """Update the Boob Bus context."""
+    execute(
+        "INSERT INTO settings (key, value) VALUES ('boobbus_info', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        [body.info],
+    )
+    return {"info": body.info}
 
 
 # ── Cron: Auto Follow-ups ────────────────────────────────────────────────────

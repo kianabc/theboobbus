@@ -4,6 +4,8 @@ import CompanyList from "./components/CompanyList";
 import CompanyDetail from "./components/CompanyDetail";
 import AddCompany from "./components/AddCompany";
 import Settings from "./components/Settings";
+import ActivityTracker from "./components/ActivityTracker";
+import BoobBusInfo from "./components/BoobBusInfo";
 import "./App.css";
 
 function LoginPage() {
@@ -77,17 +79,35 @@ function App() {
           </p>
         </div>
         <div className="header-user">
-          <button
-            className="btn btn-settings"
-            onClick={() => setView("settings")}
-            title="Settings"
-          >
-            Settings
-          </button>
+          <nav className="header-nav">
+            <button
+              className={`btn btn-nav ${view === "list" || view === "detail" || view === "add" ? "active" : ""}`}
+              onClick={goBack}
+            >
+              Companies
+            </button>
+            <button
+              className={`btn btn-nav ${view === "activity" ? "active" : ""}`}
+              onClick={() => setView("activity")}
+            >
+              Activity
+            </button>
+            <button
+              className={`btn btn-nav ${view === "boobbus-info" ? "active" : ""}`}
+              onClick={() => setView("boobbus-info")}
+            >
+              Boob Bus Info
+            </button>
+            <button
+              className={`btn btn-nav ${view === "settings" ? "active" : ""}`}
+              onClick={() => setView("settings")}
+            >
+              Settings
+            </button>
+          </nav>
           {user.picture && (
             <img src={user.picture} alt="" className="user-avatar" />
           )}
-          <span className="user-name">{user.name}</span>
           <button className="btn btn-logout" onClick={logout}>
             Sign out
           </button>
@@ -103,6 +123,10 @@ function App() {
         )}
         {view === "add" && <AddCompany onBack={goBack} />}
         {view === "settings" && <Settings onBack={goBack} />}
+        {view === "activity" && (
+          <ActivityTracker onBack={goBack} onSelectCompany={openCompany} />
+        )}
+        {view === "boobbus-info" && <BoobBusInfo onBack={goBack} />}
       </main>
     </div>
   );

@@ -118,12 +118,17 @@ Guidelines:
     else:
         raise ValueError(f"Unknown email_type: {email_type}")
 
+    # Use custom info from database if available, otherwise default
+    from database import execute as db_execute
+    rs = db_execute("SELECT value FROM settings WHERE key = 'boobbus_info'")
+    context = rs.rows[0][0] if rs.rows else BOOB_BUS_CONTEXT
+
     message = client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=500,
         system=f"""You are writing outreach emails on behalf of The Boob Bus, a mobile mammography service in Utah.
 
-{BOOB_BUS_CONTEXT}
+{context}
 
 Return ONLY the email in this exact format:
 Subject: [subject line here]

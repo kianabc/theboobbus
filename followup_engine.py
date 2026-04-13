@@ -13,30 +13,67 @@ from email_generator import generate_outreach_email
 
 logger = logging.getLogger(__name__)
 
-# Email sequence: initial -> follow_up -> final (max 3 emails)
-SEQUENCE = ["initial", "follow_up", "final"]
+# Full sequence labels (up to 5 steps)
+ALL_STEPS = ["initial", "follow_up_1", "follow_up_2", "follow_up_3", "final"]
+# Mapping for AI email types
+STEP_TO_EMAIL_TYPE = {
+    "initial": "initial",
+    "follow_up_1": "follow_up",
+    "follow_up_2": "follow_up",
+    "follow_up_3": "follow_up",
+    "final": "final",
+}
 
 DEFAULT_FOLLOW_UP_DAYS = 5
+DEFAULT_SEQUENCE_LENGTH = 3
+
+
+def _get_setting(key: str, default: str) -> str:
+    rs = execute("SELECT value FROM settings WHERE key = ?", [key])
+    return rs.rows[0][0] if rs.rows else default
+
+
+def _set_setting(key: str, value: str):
+    execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        [key, value],
+    )
 
 
 def get_follow_up_days() -> int:
-    """Get configured follow-up delay in days."""
-    rs = execute("SELECT value FROM settings WHERE key = 'follow_up_days'")
-    if rs.rows:
-        try:
-            return int(rs.rows[0][0])
-        except ValueError:
-            pass
-    return DEFAULT_FOLLOW_UP_DAYS
+    try:
+        return int(_get_setting("follow_up_days", str(DEFAULT_FOLLOW_UP_DAYS)))
+    except ValueError:
+        return DEFAULT_FOLLOW_UP_DAYS
 
 
 def set_follow_up_days(days: int):
-    """Set the follow-up delay."""
-    execute(
-        "INSERT INTO settings (key, value) VALUES ('follow_up_days', ?) "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        [str(days)],
-    )
+    _set_setting("follow_up_days", str(days))
+
+
+def get_sequence_length() -> int:
+    try:
+        return int(_get_setting("sequence_length", str(DEFAULT_SEQUENCE_LENGTH)))
+    except ValueError:
+        return DEFAULT_SEQUENCE_LENGTH
+
+
+def set_sequence_length(length: int):
+    _set_setting("sequence_length", str(length))
+
+
+def get_sequence() -> list[str]:
+    """Get the active sequence based on configured length."""
+    length = get_sequence_length()
+    if length == 2:
+        return ["initial", "final"]
+    # For 3+: initial, then follow_up_1..N-2, then final
+    steps = ["initial"]
+    for i in range(1, length - 1):
+        steps.append(f"follow_up_{i}")
+    steps.append("final")
+    return steps
 
 
 def _refresh_gmail_token(user_email: str) -> str | None:
@@ -109,15 +146,26 @@ def _check_for_reply(gmail_token: str, message_id: str) -> bool:
 
 def _send_followup_email(gmail_token: str, sent_email: dict, company: dict) -> bool:
     """Generate and send a follow-up email."""
+    sequence = get_sequence()
     current_type = sent_email["email_type"]
-    current_idx = SEQUENCE.index(current_type) if current_type in SEQUENCE else 0
-    next_idx = current_idx + 1
 
-    if next_idx >= len(SEQUENCE):
+    # Find current position in sequence
+    current_idx = -1
+    for i, step in enumerate(sequence):
+        if step == current_type:
+            current_idx = i
+            break
+    if current_idx == -1:
+        current_idx = 0  # fallback
+
+    next_idx = current_idx + 1
+    if next_idx >= len(sequence):
         logger.info("Max follow-ups reached for %s -> %s", company["name"], sent_email["to_email"])
         return False
 
-    next_type = SEQUENCE[next_idx]
+    next_type = sequence[next_idx]
+    # Map to AI email type (follow_up_1/2/3 all map to "follow_up")
+    ai_email_type = STEP_TO_EMAIL_TYPE.get(next_type, "follow_up")
 
     # Parse contact info from source if available
     contact_name = None
@@ -132,7 +180,7 @@ def _send_followup_email(gmail_token: str, sent_email: dict, company: dict) -> b
             contact_email=sent_email["to_email"],
             contact_name=contact_name,
             contact_title=contact_title,
-            email_type=next_type,
+            email_type=ai_email_type,
         )
     except Exception as e:
         logger.error("Failed to generate follow-up: %s", e)
