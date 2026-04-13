@@ -139,11 +139,11 @@ export default function BoobBusInfo({ onBack }) {
             return (
               <div
                 key={key}
-                className={`prompt-item ${!isActive ? "inactive" : ""}`}
+                className="prompt-item"
               >
                 <div
                   className="prompt-header"
-                  onClick={() => isActive && setActivePrompt(isExpanded ? null : key)}
+                  onClick={() => setActivePrompt(isExpanded ? null : key)}
                 >
                   <div className="prompt-title">
                     <span className={`prompt-badge ${isActive ? "active" : ""}`}>
@@ -151,17 +151,17 @@ export default function BoobBusInfo({ onBack }) {
                     </span>
                     <span className="prompt-name">{PROMPT_LABELS[key]}</span>
                   </div>
-                  {!isActive && (
-                    <span className="prompt-inactive-label">
-                      Not used (sequence is {sequenceLength} emails)
-                    </span>
-                  )}
-                  {isActive && (
+                  <div className="prompt-header-right">
+                    {!isActive && (
+                      <span className="prompt-inactive-label">
+                        Not in current sequence ({sequenceLength} emails)
+                      </span>
+                    )}
                     <span className="prompt-expand">{isExpanded ? "Collapse" : "Edit"}</span>
-                  )}
+                  </div>
                 </div>
 
-                {isExpanded && isActive && (
+                {isExpanded && (
                   <div className="prompt-editor">
                     <textarea
                       value={prompts[key] || ""}

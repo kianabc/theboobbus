@@ -145,6 +145,33 @@ def get_all_prompts() -> dict:
     return result
 
 
+def _get_previous_emails(contact_email: str, company_id: int | None = None) -> str:
+    """Fetch previously sent emails to this contact for context."""
+    try:
+        from database import execute as db_execute
+        if company_id:
+            rs = db_execute(
+                """SELECT email_type, subject, body FROM sent_emails
+                   WHERE to_email = ? AND company_id = ?
+                   ORDER BY sent_at ASC""",
+                [contact_email, company_id],
+            )
+        else:
+            rs = db_execute(
+                "SELECT email_type, subject, body FROM sent_emails WHERE to_email = ? ORDER BY sent_at ASC",
+                [contact_email],
+            )
+        if not rs.rows:
+            return ""
+
+        parts = []
+        for r in rs.rows:
+            parts.append(f"--- Previously sent ({r[0]}) ---\nSubject: {r[1]}\n\n{r[2]}")
+        return "\n\n".join(parts)
+    except Exception:
+        return ""
+
+
 def generate_outreach_email(
     company_name: str,
     company_industry: str,
@@ -153,6 +180,7 @@ def generate_outreach_email(
     contact_name: str | None = None,
     contact_title: str | None = None,
     email_type: str = "initial",
+    company_id: int | None = None,
 ) -> dict:
     """Generate a personalized outreach email using Claude."""
     api_key = _get_db_setting("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY", "").strip()
@@ -175,6 +203,12 @@ def generate_outreach_email(
         company_industry=company_industry,
         company_city=company_city,
     )
+
+    # For follow-ups, include previously sent emails so AI can avoid repetition
+    if email_type != "initial":
+        previous = _get_previous_emails(contact_email, company_id)
+        if previous:
+            prompt += f"\n\nHere are the emails previously sent to this contact. Do NOT repeat the same points, angles, or phrasing. Write something genuinely different:\n\n{previous}"
 
     # Use custom Boob Bus info from database if available
     context = _get_db_setting("boobbus_info") or BOOB_BUS_CONTEXT

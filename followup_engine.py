@@ -181,6 +181,7 @@ def _send_followup_email(gmail_token: str, sent_email: dict, company: dict) -> b
             contact_name=contact_name,
             contact_title=contact_title,
             email_type=ai_email_type,
+            company_id=sent_email["company_id"],
         )
     except Exception as e:
         logger.error("Failed to generate follow-up: %s", e)

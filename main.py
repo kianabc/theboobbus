@@ -425,6 +425,7 @@ def generate_email(body: GenerateEmailRequest):
         contact_name=body.contact_name,
         contact_title=body.contact_title,
         email_type=body.email_type,
+        company_id=body.company_id,
     )
     return result
 
