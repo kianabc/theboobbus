@@ -1,32 +1,35 @@
 import { useState, useEffect } from "react";
-import { fetchCompanies, fetchIndustries, fetchCities } from "../api";
+import { fetchCompanies, fetchIndustries, fetchCities, fetchCounties } from "../api";
 import "./CompanyList.css";
 
 export default function CompanyList({ onSelect, onAdd }) {
   const [companies, setCompanies] = useState([]);
   const [industries, setIndustries] = useState([]);
   const [cities, setCities] = useState([]);
+  const [counties, setCounties] = useState([]);
   const [search, setSearch] = useState("");
   const [industry, setIndustry] = useState("");
   const [city, setCity] = useState("");
+  const [county, setCounty] = useState("");
   const [sortBy, setSortBy] = useState("name");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchIndustries().then(setIndustries);
     fetchCities().then(setCities);
+    fetchCounties().then(setCounties);
   }, []);
 
   useEffect(() => {
     setLoading(true);
     const timeout = setTimeout(() => {
-      fetchCompanies(search, industry, city).then((data) => {
+      fetchCompanies(search, industry, city, county).then((data) => {
         setCompanies(data);
         setLoading(false);
       });
     }, 200);
     return () => clearTimeout(timeout);
-  }, [search, industry, city]);
+  }, [search, industry, city, county]);
 
   const sortedCompanies = [...companies].sort((a, b) => {
     if (sortBy === "newest") {
@@ -54,6 +57,18 @@ export default function CompanyList({ onSelect, onAdd }) {
           {industries.map((ind) => (
             <option key={ind} value={ind}>
               {ind}
+            </option>
+          ))}
+        </select>
+        <select
+          value={county}
+          onChange={(e) => setCounty(e.target.value)}
+          className="industry-select"
+        >
+          <option value="">All Counties</option>
+          {counties.map((c) => (
+            <option key={c} value={c}>
+              {c} County
             </option>
           ))}
         </select>

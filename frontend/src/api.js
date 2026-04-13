@@ -25,11 +25,17 @@ export async function fetchCities() {
   return res.json();
 }
 
-export async function fetchCompanies(search = "", industry = "", city = "") {
+export async function fetchCounties() {
+  const res = await authFetch(`${API}/api/counties`);
+  return res.json();
+}
+
+export async function fetchCompanies(search = "", industry = "", city = "", county = "") {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
   if (industry) params.set("industry", industry);
   if (city) params.set("city", city);
+  if (county) params.set("county", county);
   const res = await authFetch(`${API}/api/companies?${params}`);
   return res.json();
 }

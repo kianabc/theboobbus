@@ -92,11 +92,19 @@ def list_cities():
     return [r[0] for r in rs.rows]
 
 
+@app.get("/api/counties", response_model=list[str])
+def list_counties():
+    """List all distinct counties."""
+    rs = execute("SELECT DISTINCT county FROM companies WHERE county IS NOT NULL ORDER BY county")
+    return [r[0] for r in rs.rows]
+
+
 @app.get("/api/companies", response_model=list[CompanyOut])
 def list_companies(
     search: str | None = Query(None, description="Filter companies by name (case-insensitive)"),
     industry: str | None = Query(None, description="Filter by industry"),
     city: str | None = Query(None, description="Filter by city"),
+    county: str | None = Query(None, description="Filter by county"),
 ):
     """List all companies, optionally filtered by name or industry."""
     query = """
@@ -115,6 +123,9 @@ def list_companies(
     if city:
         query += " AND c.city = ?"
         params.append(city)
+    if county:
+        query += " AND c.county = ?"
+        params.append(county)
     query += " GROUP BY c.id ORDER BY c.name"
     rs = execute(query, params)
     return [{"id": r[0], "name": r[1], "website": r[2], "industry": r[3], "city": r[4], "description": r[5], "email_count": r[6]} for r in rs.rows]
