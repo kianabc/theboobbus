@@ -32,6 +32,35 @@ export default function EmailComposer({ companyId, contact, onSent }) {
   bodyRef.current = body;
   loadingRef.current = loadingDraft;
 
+  // Save using sendBeacon (survives unmount/navigation)
+  const doSaveBeacon = useCallback(() => {
+    if (loadingRef.current) return;
+    if (!subjectRef.current && !bodyRef.current) return;
+    const API = import.meta.env.VITE_API_URL ?? "";
+    const token = localStorage.getItem("google_token");
+    const url = `${API}/api/companies/${companyId}/draft`;
+    const payload = JSON.stringify({
+      contact_email: contact.email,
+      subject: subjectRef.current,
+      body: bodyRef.current,
+    });
+    // sendBeacon survives page unload; fetch with keepalive as backup
+    try {
+      const blob = new Blob([payload], { type: "application/json" });
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      // sendBeacon can't set custom headers, so use fetch with keepalive
+      fetch(url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...headers },
+        body: payload,
+        keepalive: true,
+      });
+    } catch {
+      // Fallback
+      saveDraft(companyId, { contact_email: contact.email, subject: subjectRef.current, body: bodyRef.current });
+    }
+  }, [companyId, contact.email]);
+
   const doSave = useCallback(() => {
     if (loadingRef.current) return;
     if (!subjectRef.current && !bodyRef.current) return;
@@ -57,10 +86,10 @@ export default function EmailComposer({ companyId, contact, onSent }) {
     return () => clearTimeout(timeout);
   }, [subject, body, loadingDraft, doSave]);
 
-  // Save immediately on unmount
+  // Save immediately on unmount using keepalive fetch
   useEffect(() => {
-    return () => doSave();
-  }, [doSave]);
+    return () => doSaveBeacon();
+  }, [doSaveBeacon]);
 
   // Test email countdown timer
   useEffect(() => {
