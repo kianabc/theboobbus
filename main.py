@@ -117,10 +117,10 @@ def get_company(company_id: int):
     company = {"id": r[0], "name": r[1], "website": r[2], "industry": r[3], "city": r[4]}
 
     ers = execute(
-        "SELECT email, confidence, source FROM hr_emails WHERE company_id = ? ORDER BY confidence DESC",
+        "SELECT id, email, confidence, source FROM hr_emails WHERE company_id = ? ORDER BY confidence DESC",
         [company_id],
     )
-    company["hr_emails"] = [{"email": e[0], "confidence": e[1], "source": e[2]} for e in ers.rows]
+    company["hr_emails"] = [{"id": e[0], "email": e[1], "confidence": e[2], "source": e[3]} for e in ers.rows]
     return company
 
 
@@ -132,6 +132,38 @@ def add_company(body: CompanyCreate):
         [body.name, body.website, body.industry, body.city],
     )
     company_id = rs.last_insert_rowid
+    rs2 = execute("SELECT id, name, website, industry, city FROM companies WHERE id = ?", [company_id])
+    r = rs2.rows[0]
+    return {"id": r[0], "name": r[1], "website": r[2], "industry": r[3], "city": r[4]}
+
+
+class CompanyUpdate(BaseModel):
+    name: str | None = None
+    website: str | None = None
+    industry: str | None = None
+    city: str | None = None
+
+
+@app.put("/api/companies/{company_id}")
+def update_company(company_id: int, body: CompanyUpdate):
+    """Update a company's details."""
+    rs = execute("SELECT id FROM companies WHERE id = ?", [company_id])
+    if not rs.rows:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    updates = []
+    params = []
+    for field in ["name", "website", "industry", "city"]:
+        val = getattr(body, field)
+        if val is not None:
+            updates.append(f"{field} = ?")
+            params.append(val)
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+
+    params.append(company_id)
+    execute(f"UPDATE companies SET {', '.join(updates)} WHERE id = ?", params)
+
     rs2 = execute("SELECT id, name, website, industry, city FROM companies WHERE id = ?", [company_id])
     r = rs2.rows[0]
     return {"id": r[0], "name": r[1], "website": r[2], "industry": r[3], "city": r[4]}
@@ -165,6 +197,45 @@ def add_contact(company_id: int, body: AddContactRequest):
         [company_id, body.email.lower().strip(), source, "high"],
     )
     return {"email": body.email.lower().strip(), "confidence": "high", "source": source}
+
+
+class UpdateContactRequest(BaseModel):
+    email: str | None = None
+    source: str | None = None
+    confidence: str | None = None
+
+
+@app.put("/api/contacts/{contact_id}")
+def update_contact(contact_id: int, body: UpdateContactRequest):
+    """Update a contact's details."""
+    rs = execute("SELECT id FROM hr_emails WHERE id = ?", [contact_id])
+    if not rs.rows:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    updates = []
+    params = []
+    if body.email is not None:
+        updates.append("email = ?")
+        params.append(body.email.lower().strip())
+    if body.source is not None:
+        updates.append("source = ?")
+        params.append(body.source)
+    if body.confidence is not None:
+        updates.append("confidence = ?")
+        params.append(body.confidence)
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+
+    params.append(contact_id)
+    execute(f"UPDATE hr_emails SET {', '.join(updates)} WHERE id = ?", params)
+    return {"status": "updated"}
+
+
+@app.delete("/api/contacts/{contact_id}")
+def delete_contact(contact_id: int):
+    """Delete a contact."""
+    execute("DELETE FROM hr_emails WHERE id = ?", [contact_id])
+    return {"status": "deleted"}
 
 
 @app.post("/api/companies/{company_id}/scrape", response_model=list[HREmailOut])

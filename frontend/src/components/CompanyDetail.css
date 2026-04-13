@@ -15,10 +15,59 @@
   padding: 24px;
 }
 
+.detail-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .detail-header h2 {
   font-size: 24px;
   margin-bottom: 10px;
   color: var(--gray-900);
+}
+
+.btn-edit {
+  background: var(--gray-100);
+  color: var(--gray-600);
+  border: 1px solid var(--gray-200);
+  padding: 5px 14px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.btn-edit:hover {
+  background: var(--gray-200);
+}
+
+.edit-company-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.edit-company-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gray-600);
+}
+
+.edit-company-form input {
+  padding: 8px 12px;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.edit-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 .detail-meta {
@@ -187,6 +236,27 @@
   font-size: 12px;
   color: #2563eb;
   font-weight: 600;
+}
+
+.actions-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-delete-sm {
+  background: none;
+  border: none;
+  color: var(--gray-400);
+  font-size: 18px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.btn-delete-sm:hover {
+  background: #fee2e2;
+  color: var(--red);
 }
 
 .badge-type {

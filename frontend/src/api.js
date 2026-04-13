@@ -85,6 +85,22 @@ export async function fetchOutreachHistory(companyId) {
   return res.json();
 }
 
+export async function updateCompany(companyId, data) {
+  const res = await authFetch(`${API}/api/companies/${companyId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+export async function deleteContact(contactId) {
+  const res = await authFetch(`${API}/api/contacts/${contactId}`, {
+    method: "DELETE",
+  });
+  return res.json();
+}
+
 export async function addContact(companyId, data) {
   const res = await authFetch(`${API}/api/companies/${companyId}/contacts`, {
     method: "POST",

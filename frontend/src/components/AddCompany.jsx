@@ -62,10 +62,10 @@ export default function AddCompany({ onBack }) {
         <label>
           Website
           <input
-            type="url"
+            type="text"
             value={form.website}
             onChange={update("website")}
-            placeholder="https://www.example.com"
+            placeholder="www.example.com"
           />
         </label>
 
