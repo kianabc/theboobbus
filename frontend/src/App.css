@@ -58,9 +58,11 @@
 }
 
 .header-logo {
-  height: 40px;
+  height: 56px;
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: 8px;
+  background: white;
+  padding: 4px 8px;
 }
 
 .header-text {
