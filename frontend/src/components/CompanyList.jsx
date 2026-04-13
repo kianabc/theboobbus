@@ -63,7 +63,14 @@ export default function CompanyList({ onSelect, onAdd }) {
               className="company-card"
               onClick={() => onSelect(c.id)}
             >
-              <h3>{c.name}</h3>
+              <div className="card-top">
+                <h3>{c.name}</h3>
+                {c.email_count > 0 && (
+                  <span className="email-indicator" title={`${c.email_count} contact(s) found`}>
+                    {c.email_count}
+                  </span>
+                )}
+              </div>
               <div className="card-meta">
                 <span className="badge badge-industry">{c.industry}</span>
                 <span className="card-city">{c.city}</span>

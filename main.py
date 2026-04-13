@@ -7,10 +7,11 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from auth import get_current_user
 from database import init_db, execute
 from seed_data import seed_companies
 from scraper import scrape_company
@@ -30,15 +31,16 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Utah HR Email Finder",
-    description="API to find HR department emails for top Utah companies across all industries.",
-    version="1.0.0",
+    title="Boob Bus HQ",
+    description="Lead generation tool for The Boob Bus - find HR contacts at Utah companies to book mobile mammography visits.",
+    version="2.0.0",
     lifespan=lifespan,
+    dependencies=[Depends(get_current_user)],
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["http://localhost:5173", "https://theboobbus.vercel.app"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -52,6 +54,7 @@ class CompanyOut(BaseModel):
     website: str | None
     industry: str | None
     city: str | None
+    email_count: int = 0
 
 
 class HREmailOut(BaseModel):
@@ -86,17 +89,22 @@ def list_companies(
     industry: str | None = Query(None, description="Filter by industry"),
 ):
     """List all companies, optionally filtered by name or industry."""
-    query = "SELECT id, name, website, industry, city FROM companies WHERE 1=1"
+    query = """
+        SELECT c.id, c.name, c.website, c.industry, c.city, COUNT(e.id) as email_count
+        FROM companies c
+        LEFT JOIN hr_emails e ON e.company_id = c.id
+        WHERE 1=1
+    """
     params: list = []
     if search:
-        query += " AND name LIKE ?"
+        query += " AND c.name LIKE ?"
         params.append(f"%{search}%")
     if industry:
-        query += " AND industry LIKE ?"
+        query += " AND c.industry LIKE ?"
         params.append(f"%{industry}%")
-    query += " ORDER BY name"
+    query += " GROUP BY c.id ORDER BY c.name"
     rs = execute(query, params)
-    return [{"id": r[0], "name": r[1], "website": r[2], "industry": r[3], "city": r[4]} for r in rs.rows]
+    return [{"id": r[0], "name": r[1], "website": r[2], "industry": r[3], "city": r[4], "email_count": r[5]} for r in rs.rows]
 
 
 @app.get("/api/companies/{company_id}", response_model=CompanyWithEmails)

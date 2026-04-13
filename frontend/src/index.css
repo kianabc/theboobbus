@@ -1,13 +1,14 @@
 :root {
-  --primary: #2563eb;
-  --primary-hover: #1d4ed8;
-  --primary-light: #eff6ff;
+  --primary: #d6548e;
+  --primary-hover: #c2407a;
+  --primary-light: #fdf2f8;
+  --primary-dark: #9d174d;
   --green: #16a34a;
   --green-light: #f0fdf4;
   --yellow: #ca8a04;
   --yellow-light: #fefce8;
   --red: #dc2626;
-  --gray-50: #f9fafb;
+  --gray-50: #faf9fb;
   --gray-100: #f3f4f6;
   --gray-200: #e5e7eb;
   --gray-300: #d1d5db;

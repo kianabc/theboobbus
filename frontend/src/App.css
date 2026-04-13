@@ -4,23 +4,116 @@
   flex-direction: column;
 }
 
-.app-header {
-  background: var(--primary);
-  color: white;
-  padding: 32px 24px;
+/* ── Login Page ───────────────────────────────────────────────────── */
+
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(160deg, #fdf2f8 0%, #fff 50%, #fce7f3 100%);
   text-align: center;
+  padding: 24px;
 }
 
-.app-header h1 {
-  font-size: 28px;
+.login-logo {
+  width: 200px;
+  margin-bottom: 24px;
+}
+
+.login-page h1 {
+  font-size: 36px;
+  font-weight: 800;
+  color: #d6548e;
+  margin: 0 0 8px;
+}
+
+.login-subtitle {
+  font-size: 16px;
+  color: var(--gray-500);
+  margin: 0 0 32px;
+  max-width: 360px;
+}
+
+.login-btn-wrapper {
+  margin-bottom: 24px;
+  min-height: 44px;
+}
+
+.login-footer {
+  font-size: 13px;
+  color: var(--gray-400);
+}
+
+/* ── Header ───────────────────────────────────────────────────────── */
+
+.app-header {
+  background: linear-gradient(135deg, #d6548e 0%, #e88ab4 100%);
+  color: white;
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.header-logo {
+  height: 40px;
+  cursor: pointer;
+  filter: brightness(0) invert(1);
+}
+
+.header-text {
+  flex: 1;
+}
+
+.header-text h1 {
+  font-size: 22px;
   font-weight: 700;
-  margin: 0 0 6px;
+  margin: 0;
+  cursor: pointer;
 }
 
-.app-header .subtitle {
-  font-size: 15px;
+.header-text .subtitle {
+  font-size: 12px;
   opacity: 0.85;
+  margin: 1px 0 0;
 }
+
+.header-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+}
+
+.user-name {
+  opacity: 0.9;
+}
+
+.btn-logout {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.15s;
+}
+
+.btn-logout:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+/* ── Main ─────────────────────────────────────────────────────────── */
 
 .app-main {
   max-width: 960px;

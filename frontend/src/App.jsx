@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { useAuth } from "./AuthContext";
 import CompanyList from "./components/CompanyList";
 import CompanyDetail from "./components/CompanyDetail";
 import AddCompany from "./components/AddCompany";
 import "./App.css";
 
 function App() {
+  const { user, loading, logout, btnRef } = useAuth();
   const [selectedCompanyId, setSelectedCompanyId] = useState(null);
   const [view, setView] = useState("list");
 
@@ -18,16 +20,56 @@ function App() {
     setView("list");
   };
 
+  if (loading) {
+    return (
+      <div className="login-page">
+        <img src="/logo.png" alt="Boob Bus" className="login-logo" />
+        <p>Loading...</p>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="login-page">
+        <img src="/logo.png" alt="Boob Bus" className="login-logo" />
+        <h1>Boob Bus HQ</h1>
+        <p className="login-subtitle">
+          Lead generation & outreach for mobile mammography bookings
+        </p>
+        <div className="login-btn-wrapper">
+          <div ref={btnRef} />
+        </div>
+        <p className="login-footer">
+          Sign in with Google to access the dashboard
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <header className="app-header">
-        <div className="header-content">
-          <h1 onClick={goBack} style={{ cursor: "pointer" }}>
-            Utah HR Email Finder
-          </h1>
+        <img
+          src="/logo.png"
+          alt="Boob Bus"
+          className="header-logo"
+          onClick={goBack}
+        />
+        <div className="header-text">
+          <h1 onClick={goBack}>Boob Bus HQ</h1>
           <p className="subtitle">
-            Find HR department contacts for top Utah companies
+            Find HR contacts & book mobile mammography visits for Utah companies
           </p>
+        </div>
+        <div className="header-user">
+          {user.picture && (
+            <img src={user.picture} alt="" className="user-avatar" />
+          )}
+          <span className="user-name">{user.name}</span>
+          <button className="btn btn-logout" onClick={logout}>
+            Sign out
+          </button>
         </div>
       </header>
 

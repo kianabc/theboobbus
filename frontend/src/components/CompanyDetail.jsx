@@ -65,17 +65,17 @@ export default function CompanyDetail({ companyId, onBack }) {
           onClick={handleScrape}
           disabled={scraping}
         >
-          {scraping ? "Scraping..." : "Scrape for HR Emails"}
+          {scraping ? "Finding contacts..." : "Find HR Contacts"}
         </button>
         {scrapeResult && <span className="scrape-result">{scrapeResult}</span>}
       </div>
 
       <div className="emails-section">
-        <h3>HR Emails ({company.hr_emails.length})</h3>
+        <h3>HR Contacts ({company.hr_emails.length})</h3>
         {company.hr_emails.length === 0 ? (
           <p className="no-emails">
-            No emails found yet. Click "Scrape for HR Emails" to search this
-            company's website.
+            No contacts found yet. Click "Find HR Contacts" to search for
+            decision makers at this company.
           </p>
         ) : (
           <table className="email-table">
