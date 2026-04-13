@@ -188,6 +188,22 @@
   gap: 4px;
 }
 
+.gmail-connected {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--green-light);
+  border: 1px solid #86efac;
+  border-radius: var(--radius);
+}
+
+.gmail-status-icon {
+  font-size: 20px;
+  color: var(--green);
+  font-weight: 700;
+}
+
 .api-key-input {
   width: 100%;
   padding: 8px 12px;

@@ -691,6 +691,75 @@ def get_prompts():
 
 # ── Cron: Auto Follow-ups ────────────────────────────────────────────────────
 
+# ── Gmail OAuth (refresh token) ───────────────────────────────────────────────
+
+class GmailAuthRequest(BaseModel):
+    code: str
+    redirect_uri: str
+
+
+@app.post("/api/gmail/authorize")
+def gmail_authorize(body: GmailAuthRequest, request: Request):
+    """Exchange an authorization code for access + refresh tokens."""
+    import requests as http_requests
+
+    client_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+    client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
+    if not client_id or not client_secret:
+        raise HTTPException(status_code=500, detail="Google OAuth not configured")
+
+    # Exchange code for tokens
+    resp = http_requests.post("https://oauth2.googleapis.com/token", data={
+        "code": body.code,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "redirect_uri": body.redirect_uri,
+        "grant_type": "authorization_code",
+    }, timeout=15)
+
+    if resp.status_code != 200:
+        logger.error("Gmail OAuth token exchange failed: %s", resp.text)
+        raise HTTPException(status_code=400, detail="Failed to exchange authorization code")
+
+    tokens = resp.json()
+    refresh_token = tokens.get("refresh_token")
+    access_token = tokens.get("access_token")
+
+    if not refresh_token:
+        raise HTTPException(status_code=400, detail="No refresh token received. You may need to revoke access and re-authorize.")
+
+    # Get user email from the access token
+    user_resp = http_requests.get(
+        "https://www.googleapis.com/oauth2/v2/userinfo",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=10,
+    )
+    user_email = "unknown"
+    if user_resp.status_code == 200:
+        user_email = user_resp.json().get("email", "unknown")
+
+    # Store the refresh token
+    execute(
+        """INSERT INTO gmail_tokens (user_email, refresh_token)
+           VALUES (?, ?)
+           ON CONFLICT(user_email) DO UPDATE SET refresh_token = excluded.refresh_token, updated_at = CURRENT_TIMESTAMP""",
+        [user_email, refresh_token],
+    )
+
+    logger.info("Stored Gmail refresh token for %s", user_email)
+    return {"status": "authorized", "email": user_email}
+
+
+@app.get("/api/gmail/status")
+def gmail_status(request: Request):
+    """Check if a Gmail refresh token is stored for auto follow-ups."""
+    user = get_current_user(request)
+    rs = execute("SELECT user_email, updated_at FROM gmail_tokens WHERE user_email = ?", [user["email"]])
+    if rs.rows:
+        return {"authorized": True, "email": rs.rows[0][0], "updated_at": rs.rows[0][1]}
+    return {"authorized": False}
+
+
 # ── Email Open Tracking ───────────────────────────────────────────────────────
 
 from fastapi.responses import Response

@@ -140,6 +140,20 @@ export async function saveDraft(companyId, data) {
   return res.json();
 }
 
+export async function gmailAuthorize(code, redirectUri) {
+  const res = await authFetch(`${API}/api/gmail/authorize`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code, redirect_uri: redirectUri }),
+  });
+  return res.json();
+}
+
+export async function gmailStatus() {
+  const res = await authFetch(`${API}/api/gmail/status`);
+  return res.json();
+}
+
 export async function fetchSettings() {
   const res = await authFetch(`${API}/api/settings`);
   return res.json();

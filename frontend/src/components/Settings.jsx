@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
-import { fetchSettings, updateSettings } from "../api";
+import { fetchSettings, updateSettings, gmailAuthorize, gmailStatus } from "../api";
 import "./Settings.css";
+
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
 const STEP_LABELS = {
   2: ["Initial Outreach", "Final Check-in"],
@@ -13,9 +15,12 @@ export default function Settings({ onBack }) {
   const [settings, setSettings] = useState(null);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null);
+  const [gmail, setGmail] = useState(null);
+  const [connectingGmail, setConnectingGmail] = useState(false);
 
   useEffect(() => {
     fetchSettings().then(setSettings);
+    gmailStatus().then(setGmail);
   }, []);
 
   const update = (key, value) => setSettings((s) => ({ ...s, [key]: value }));
@@ -200,6 +205,63 @@ export default function Settings({ onBack }) {
             <span className="settings-hint">Leave blank to use environment variable</span>
           </div>
         </div>
+      </div>
+
+      {/* ── Gmail Connection for Auto Follow-ups ── */}
+      <div className="settings-card">
+        <h2>Gmail Connection</h2>
+        <p className="settings-desc">
+          Connect your Gmail account to enable automatic follow-up emails.
+          Without this, follow-ups must be sent manually.
+        </p>
+
+        {gmail?.authorized ? (
+          <div className="gmail-connected">
+            <span className="gmail-status-icon">&#10003;</span>
+            <div>
+              <strong>Connected:</strong> {gmail.email}
+              <br/>
+              <span className="settings-hint">
+                Auto follow-ups are active. Last updated: {new Date(gmail.updated_at).toLocaleString()}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <button
+            className="btn btn-primary"
+            disabled={connectingGmail}
+            onClick={() => {
+              setConnectingGmail(true);
+              const redirectUri = window.location.origin;
+              // Use Google's code client to get an authorization code with offline access
+              const codeClient = window.google.accounts.oauth2.initCodeClient({
+                client_id: GOOGLE_CLIENT_ID,
+                scope: "https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly",
+                ux_mode: "popup",
+                redirect_uri: redirectUri,
+                callback: async (response) => {
+                  if (response.error) {
+                    setStatus({ type: "error", text: "Gmail authorization denied" });
+                    setConnectingGmail(false);
+                    return;
+                  }
+                  try {
+                    const result = await gmailAuthorize(response.code, redirectUri);
+                    setGmail({ authorized: true, email: result.email, updated_at: new Date().toISOString() });
+                    setStatus({ type: "success", text: "Gmail connected! Auto follow-ups are now active." });
+                  } catch (e) {
+                    setStatus({ type: "error", text: "Failed to connect Gmail: " + e.message });
+                  } finally {
+                    setConnectingGmail(false);
+                  }
+                },
+              });
+              codeClient.requestCode();
+            }}
+          >
+            {connectingGmail ? "Connecting..." : "Connect Gmail for Auto Follow-ups"}
+          </button>
+        )}
       </div>
 
       {/* ── Save ── */}
