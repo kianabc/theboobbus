@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { fetchSettings, updateSettings, gmailAuthorize, gmailStatus } from "../api";
+import { fetchSettings, updateSettings, gmailAuthorize, gmailStatus, gmailDisconnect } from "../api";
 import "./Settings.css";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
@@ -273,13 +273,25 @@ export default function Settings({ onBack }) {
         {gmail?.authorized ? (
           <div className="gmail-connected">
             <span className="gmail-status-icon">&#10003;</span>
-            <div>
+            <div style={{flex: 1}}>
               <strong>Connected:</strong> {gmail.email}
               <br/>
               <span className="settings-hint">
                 Auto follow-ups are active. Last updated: {new Date(gmail.updated_at).toLocaleString()}
               </span>
             </div>
+            <button
+              className="btn btn-secondary"
+              style={{marginLeft: "auto", fontSize: 12}}
+              onClick={async () => {
+                if (!confirm(`Disconnect ${gmail.email}? Auto follow-ups will stop until you reconnect.`)) return;
+                await gmailDisconnect();
+                setGmail({ authorized: false });
+                setStatus({ type: "success", text: "Gmail disconnected. You can connect a different account now." });
+              }}
+            >
+              Disconnect
+            </button>
           </div>
         ) : (
           <button

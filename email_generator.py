@@ -225,12 +225,6 @@ def generate_outreach_email(
         company_city=company_city,
     )
 
-    # Add sender name context
-    if sender_name:
-        prompt += f"\n\nSign off as: {sender_name}, The Boob Bus team"
-    else:
-        prompt += "\n\nSign off as: The Boob Bus team"
-
     # For follow-ups, include timing and previous emails
     if email_type != "initial":
         if days_since_last is not None:
@@ -271,14 +265,14 @@ CRITICAL RULES:
 - NEVER make up statistics, dollar amounts, quotes, stories, or testimonials. Only use facts explicitly provided above.
 - NEVER mention "special rates", "discounts", or "limited time offers" unless explicitly stated in the info above.
 - NEVER use em-dashes or en-dashes (-- or the unicode characters). Use commas, periods, or "and" instead.
-- NEVER sign off as "[Your name]" or "[Your Name]". Do NOT include a sign-off or signature at the end of the email. The signature will be appended automatically.
+- NEVER include a closing, sign-off, or signature. No "Best,", "Thanks,", "Cheers,", "Warm regards,", "[Your name]", "The Boob Bus team", etc. End with your last sentence or question. The signature is added automatically after your text.
 - Keep punctuation simple and clean.
 - Most customers pay nothing out of pocket because insurance covers the screening. Mention this.
 
 Return ONLY the email in this exact format:
 Subject: [subject line here]
 
-[email body here, ending with the last sentence of the message. Do NOT add a sign-off, name, or signature.]
+[email body ONLY. End with your final sentence or question. Do NOT add any closing, sign-off, regards, name, or signature line.]
 
 Do not include any other text, explanation, or commentary.""",
         messages=[{"role": "user", "content": prompt}],
@@ -301,6 +295,17 @@ Do not include any other text, explanation, or commentary.""",
     # Clean dashes from subject too
     subject = subject.replace("\u2014", ", ").replace("\u2013", "-")
     body = body.replace("\u2014", ", ").replace("\u2013", "-")
+
+    # Strip any sign-offs the AI added despite instructions
+    import re
+    sign_off_patterns = [
+        r'\n\s*(Best|Cheers|Thanks|Thank you|Warm regards|Kind regards|Regards|Sincerely|All the best|Looking forward),?\s*\n.*$',
+        r'\n\s*\[Your [Nn]ame\].*$',
+        r'\n\s*The Boob Bus [Tt]eam\s*$',
+        r'\n\s*The Boob Bus\s*$',
+    ]
+    for pattern in sign_off_patterns:
+        body = re.sub(pattern, '', body, flags=re.DOTALL).rstrip()
 
     # Append email signature
     sig_template = _get_db_setting("email_signature", "{sender_name}\nThe Boob Bus\nhttps://theboobbus.com\n(866) 747-BOOB")

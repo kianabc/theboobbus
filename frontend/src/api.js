@@ -168,6 +168,11 @@ export async function startTestSequence(data) {
   return res.json();
 }
 
+export async function gmailDisconnect() {
+  const res = await authFetch(`${API}/api/gmail/disconnect`, { method: "DELETE" });
+  return res.json();
+}
+
 export async function gmailAuthorize(code, redirectUri) {
   const res = await authFetch(`${API}/api/gmail/authorize`, {
     method: "POST",

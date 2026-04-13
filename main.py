@@ -1017,6 +1017,15 @@ def gmail_status(request: Request):
     return {"authorized": False}
 
 
+@app.delete("/api/gmail/disconnect")
+def gmail_disconnect(request: Request):
+    """Remove stored Gmail refresh token."""
+    user = get_current_user(request)
+    execute("DELETE FROM gmail_tokens WHERE user_email = ?", [user["email"]])
+    logger.info("AUDIT: Gmail disconnected by %s", user["email"])
+    return {"status": "disconnected"}
+
+
 # ── Email Open Tracking ───────────────────────────────────────────────────────
 
 from fastapi.responses import Response
