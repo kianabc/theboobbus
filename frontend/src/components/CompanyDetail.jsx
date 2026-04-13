@@ -309,11 +309,20 @@ export default function CompanyDetail({ companyId, onBack }) {
                   );
                 }
 
+                const isOpen = composingFor === i;
                 return (
                   <>
-                    <tr key={i}>
+                    <tr
+                      key={i}
+                      className={`contact-row ${isOpen ? "contact-row-active" : ""} ${!contacted ? "contact-row-clickable" : ""}`}
+                      onClick={() => {
+                        if (!contacted && editingContactIdx !== i) {
+                          setComposingFor(isOpen ? null : i);
+                        }
+                      }}
+                    >
                       <td>
-                        <a href={`mailto:${e.email}`} className="email-link">{e.email}</a>
+                        <a href={`mailto:${e.email}`} className="email-link" onClick={(ev) => ev.stopPropagation()}>{e.email}</a>
                       </td>
                       <td className="name-cell">{sourceName || "-"}</td>
                       <td className="title-cell">{sourceTitle || "-"}</td>
@@ -325,17 +334,12 @@ export default function CompanyDetail({ companyId, onBack }) {
                         {contacted ? (
                           <span className="badge badge-contacted">Contacted</span>
                         ) : (
-                          <span className="badge badge-not-contacted">Not contacted</span>
+                          <span className="badge badge-not-contacted">
+                            {isOpen ? "Composing..." : "Not contacted"}
+                          </span>
                         )}
                       </td>
-                      <td className="actions-cell">
-                        {contacted ? (
-                          <span className="contacted-check">Sent</span>
-                        ) : (
-                          <button className="btn btn-compose" onClick={() => setComposingFor(composingFor === i ? null : i)}>
-                            {composingFor === i ? "Close" : "Compose"}
-                          </button>
-                        )}
+                      <td className="actions-cell" onClick={(ev) => ev.stopPropagation()}>
                         <button
                           className="btn btn-edit-sm"
                           onClick={() => {
@@ -355,7 +359,7 @@ export default function CompanyDetail({ companyId, onBack }) {
                         </button>
                       </td>
                     </tr>
-                    {composingFor === i && !contacted && (
+                    {isOpen && !contacted && (
                       <tr key={`composer-${i}`}>
                         <td colSpan={7} className="composer-cell">
                           <EmailComposer companyId={companyId} contact={e} onSent={load} />

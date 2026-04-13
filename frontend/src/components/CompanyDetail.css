@@ -173,6 +173,20 @@
   font-size: 14px;
 }
 
+.contact-row-clickable {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.contact-row-clickable:hover {
+  background: var(--primary-light);
+}
+
+.contact-row-active {
+  background: var(--primary-light);
+  border-left: 3px solid var(--primary);
+}
+
 .email-link {
   color: var(--primary);
   text-decoration: none;

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { generateEmail, sendEmail, getDraft, saveDraft } from "../api";
 import "./EmailComposer.css";
 
@@ -24,12 +24,26 @@ export default function EmailComposer({ companyId, contact, onSent }) {
   const contactName = contact.source?.match(/- (.+?),/)?.[1] || null;
   const contactTitle = contact.source?.match(/, (.+?)$/)?.[1]?.replace(/\(.*\)/, "").trim() || null;
 
+  // Track latest values in refs so unmount save has current data
+  const subjectRef = useRef(subject);
+  const bodyRef = useRef(body);
+  const loadingRef = useRef(true);
+  subjectRef.current = subject;
+  bodyRef.current = body;
+  loadingRef.current = loadingDraft;
+
+  const doSave = useCallback(() => {
+    if (loadingRef.current) return;
+    if (!subjectRef.current && !bodyRef.current) return;
+    saveDraft(companyId, { contact_email: contact.email, subject: subjectRef.current, body: bodyRef.current });
+  }, [companyId, contact.email]);
+
   // Load saved draft on mount
   useEffect(() => {
     getDraft(companyId, contact.email).then((draft) => {
       if (draft.subject || draft.body) {
-        setSubject(draft.subject);
-        setBody(draft.body);
+        setSubject(draft.subject || "");
+        setBody(draft.body || "");
       }
       setLoadingDraft(false);
     });
@@ -39,11 +53,14 @@ export default function EmailComposer({ companyId, contact, onSent }) {
   useEffect(() => {
     if (loadingDraft) return;
     if (!subject && !body) return;
-    const timeout = setTimeout(() => {
-      saveDraft(companyId, { contact_email: contact.email, subject, body });
-    }, 1000);
+    const timeout = setTimeout(doSave, 1000);
     return () => clearTimeout(timeout);
-  }, [subject, body, loadingDraft]);
+  }, [subject, body, loadingDraft, doSave]);
+
+  // Save immediately on unmount
+  useEffect(() => {
+    return () => doSave();
+  }, [doSave]);
 
   // Test email countdown timer
   useEffect(() => {
