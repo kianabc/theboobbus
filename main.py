@@ -212,26 +212,6 @@ def list_all_emails(
     return [{"company": r[0], "industry": r[1], "email": r[2], "confidence": r[3], "source": r[4]} for r in rs.rows]
 
 
-@app.get("/api/debug")
-def debug_info():
-    """Debug endpoint to diagnose deployment issues."""
-    import traceback
-    info = {
-        "turso_url_set": bool(os.environ.get("TURSO_DATABASE_URL")),
-        "turso_token_set": bool(os.environ.get("TURSO_AUTH_TOKEN")),
-        "vercel": os.environ.get("VERCEL", "not set"),
-    }
-    try:
-        rs = execute("SELECT COUNT(*) FROM companies")
-        info["db_status"] = "connected"
-        info["company_count"] = rs.rows[0][0]
-    except Exception as e:
-        info["db_status"] = "error"
-        info["db_error"] = f"{type(e).__name__}: {e}"
-        info["traceback"] = traceback.format_exc()
-    return info
-
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
