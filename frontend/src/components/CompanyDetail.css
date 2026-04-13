@@ -1,0 +1,121 @@
+.company-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.back-btn {
+  align-self: flex-start;
+}
+
+.detail-header {
+  background: white;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius);
+  padding: 24px;
+}
+
+.detail-header h2 {
+  font-size: 24px;
+  margin-bottom: 10px;
+  color: var(--gray-900);
+}
+
+.detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--gray-500);
+  font-size: 14px;
+}
+
+.detail-link {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.detail-link:hover {
+  text-decoration: underline;
+}
+
+.scrape-section {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.scrape-result {
+  font-size: 14px;
+  color: var(--gray-600);
+  font-style: italic;
+}
+
+.emails-section {
+  background: white;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius);
+  padding: 24px;
+}
+
+.emails-section h3 {
+  font-size: 18px;
+  margin-bottom: 16px;
+  color: var(--gray-900);
+}
+
+.no-emails {
+  color: var(--gray-500);
+  font-size: 14px;
+}
+
+.email-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.email-table th {
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--gray-500);
+  padding: 8px 12px;
+  border-bottom: 2px solid var(--gray-200);
+}
+
+.email-table td {
+  padding: 12px;
+  border-bottom: 1px solid var(--gray-100);
+  font-size: 14px;
+}
+
+.email-link {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.email-link:hover {
+  text-decoration: underline;
+}
+
+.badge-high {
+  background: var(--green-light);
+  color: var(--green);
+}
+
+.badge-medium {
+  background: var(--yellow-light);
+  color: var(--yellow);
+}
+
+.badge-low {
+  background: var(--gray-100);
+  color: var(--gray-500);
+}
+
+.source-cell {
+  color: var(--gray-500);
+  font-size: 13px;
+}
