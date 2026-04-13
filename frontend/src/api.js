@@ -101,6 +101,15 @@ export async function deleteCompany(companyId) {
   return res.json();
 }
 
+export async function updateContact(contactId, data) {
+  const res = await authFetch(`${API}/api/contacts/${contactId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
 export async function deleteContact(contactId) {
   const res = await authFetch(`${API}/api/contacts/${contactId}`, {
     method: "DELETE",

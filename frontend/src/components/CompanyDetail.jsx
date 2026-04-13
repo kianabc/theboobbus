@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   fetchCompany, scrapeCompany, fetchOutreachHistory,
-  addContact, updateCompany, deleteContact, deleteCompany,
+  addContact, updateCompany, deleteContact, deleteCompany, updateContact,
 } from "../api";
 import EmailComposer from "./EmailComposer";
 import "./CompanyDetail.css";
@@ -15,6 +15,8 @@ export default function CompanyDetail({ companyId, onBack }) {
   const [showAddContact, setShowAddContact] = useState(false);
   const [newContact, setNewContact] = useState({ email: "", name: "", title: "" });
   const [addingContact, setAddingContact] = useState(false);
+  const [editingContactIdx, setEditingContactIdx] = useState(null);
+  const [editContact, setEditContact] = useState({});
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({});
   const [savingEdit, setSavingEdit] = useState(false);
@@ -264,6 +266,7 @@ export default function CompanyDetail({ companyId, onBack }) {
             <tbody>
               {company.hr_emails.map((e, i) => {
                 const contacted = contactedEmails.has(e.email);
+                const isEditing = editingContactIdx === i;
                 // Parse "Source - Name, Title" from source string
                 const s = e.source || "";
                 const dashIdx = s.indexOf(" - ");
@@ -281,6 +284,31 @@ export default function CompanyDetail({ companyId, onBack }) {
                     sourceName = rest;
                   }
                 }
+
+                if (isEditing) {
+                  return (
+                    <tr key={i} className="editing-row">
+                      <td><input value={editContact.email} onChange={(ev) => setEditContact({...editContact, email: ev.target.value})} className="inline-edit" /></td>
+                      <td><input value={editContact.name} onChange={(ev) => setEditContact({...editContact, name: ev.target.value})} className="inline-edit" placeholder="Name" /></td>
+                      <td><input value={editContact.title} onChange={(ev) => setEditContact({...editContact, title: ev.target.value})} className="inline-edit" placeholder="Title" /></td>
+                      <td className="source-cell">{sourceOrigin}</td>
+                      <td><span className={`badge badge-${e.confidence}`}>{e.confidence}</span></td>
+                      <td></td>
+                      <td className="actions-cell">
+                        <button className="btn btn-compose" onClick={async () => {
+                          const newSource = editContact.name || editContact.title
+                            ? `${sourceOrigin} - ${[editContact.name, editContact.title].filter(Boolean).join(", ")}`
+                            : sourceOrigin;
+                          await updateContact(e.id, { email: editContact.email, source: newSource });
+                          setEditingContactIdx(null);
+                          load();
+                        }}>Save</button>
+                        <button className="btn btn-delete-sm" onClick={() => setEditingContactIdx(null)} title="Cancel">&times;</button>
+                      </td>
+                    </tr>
+                  );
+                }
+
                 return (
                   <>
                     <tr key={i}>
@@ -308,6 +336,16 @@ export default function CompanyDetail({ companyId, onBack }) {
                             {composingFor === i ? "Close" : "Compose"}
                           </button>
                         )}
+                        <button
+                          className="btn btn-edit-sm"
+                          onClick={() => {
+                            setEditingContactIdx(i);
+                            setEditContact({ email: e.email, name: sourceName, title: sourceTitle });
+                          }}
+                          title="Edit contact"
+                        >
+                          &#9998;
+                        </button>
                         <button
                           className="btn btn-delete-sm"
                           onClick={() => handleDeleteContact(e.id, e.email)}
