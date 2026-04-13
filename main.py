@@ -13,6 +13,8 @@ from pydantic import BaseModel
 
 from auth import get_current_user
 from database import init_db, execute
+from encryption import encrypt as enc_encrypt, decrypt as enc_decrypt
+from rate_limit import check_rate_limit
 from seed_data import seed_companies
 from scraper import scrape_company
 from email_finders import find_hr_emails
@@ -41,9 +43,28 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "https://theboobbus.vercel.app"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Gmail-Token", "X-Gmail-Refresh-Token"],
 )
+
+
+# Security headers middleware
+from starlette.middleware.base import BaseHTTPMiddleware
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        if not request.url.path.startswith("/api/track/"):
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 # ── Pydantic models ──────────────────────────────────────────────────────────
@@ -222,6 +243,12 @@ def delete_company(company_id: int):
     }
 
 
+import re
+
+def _validate_email(email: str) -> bool:
+    return bool(re.match(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$', email))
+
+
 class AddContactRequest(BaseModel):
     email: str
     name: str | None = None
@@ -231,6 +258,8 @@ class AddContactRequest(BaseModel):
 @app.post("/api/companies/{company_id}/contacts")
 def add_contact(company_id: int, body: AddContactRequest):
     """Manually add a contact to a company."""
+    if not _validate_email(body.email):
+        raise HTTPException(status_code=400, detail="Invalid email format")
     rs = execute("SELECT id FROM companies WHERE id = ?", [company_id])
     if not rs.rows:
         raise HTTPException(status_code=404, detail="Company not found")
@@ -436,6 +465,11 @@ def generate_email(body: GenerateEmailRequest, request: Request):
     from email_generator import generate_outreach_email
     from datetime import datetime, timezone
 
+    # Rate limit: 20 generations per hour per user
+    user_rl = get_current_user(request)
+    if not check_rate_limit(f"gen:{user_rl['email']}", 20, 3600):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded. Max 20 AI generations per hour.")
+
     rs = execute("SELECT name, industry, city FROM companies WHERE id = ?", [body.company_id])
     if not rs.rows:
         raise HTTPException(status_code=404, detail="Company not found")
@@ -485,6 +519,15 @@ def send_email(body: SendEmailRequest, request: Request):
     """
     import requests as http_requests
 
+    # Validate recipient email
+    if not _validate_email(body.to):
+        raise HTTPException(status_code=400, detail="Invalid recipient email format")
+
+    # Rate limit: 10 emails per hour per user
+    user = get_current_user(request)
+    if not check_rate_limit(f"send:{user['email']}", 10, 3600):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded. Max 10 emails per hour.")
+
     gmail_token = request.headers.get("X-Gmail-Token", "")
 
     # Try to use stored refresh token first
@@ -497,7 +540,7 @@ def send_email(body: SendEmailRequest, request: Request):
             resp = http_requests.post("https://oauth2.googleapis.com/token", data={
                 "client_id": client_id,
                 "client_secret": client_secret,
-                "refresh_token": rs.rows[0][0],
+                "refresh_token": enc_decrypt(rs.rows[0][0]),
                 "grant_type": "refresh_token",
             }, timeout=10)
             if resp.status_code == 200:
@@ -516,11 +559,15 @@ def send_email(body: SendEmailRequest, request: Request):
     tracking_url = f"{base_url}/api/track/{tracking_id}"
     tracking_pixel = f'<img src="{tracking_url}" width="1" height="1" style="display:none" />'
 
+    # Sanitize headers — strip newlines to prevent header injection
+    safe_subject = body.subject.replace("\r", "").replace("\n", " ").strip()[:200]
+    safe_to = body.to.replace("\r", "").replace("\n", "").strip()
+
     # Build HTML email with tracking pixel
     html_body = body.body.replace("\n", "<br>") + tracking_pixel
     msg = MIMEMultipart("alternative")
-    msg["To"] = body.to
-    msg["Subject"] = body.subject
+    msg["To"] = safe_to
+    msg["Subject"] = safe_subject
     msg.attach(MIMEText(body.body, "plain"))
     msg.attach(MIMEText(html_body, "html"))
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
@@ -539,7 +586,7 @@ def send_email(body: SendEmailRequest, request: Request):
 
     if resp.status_code != 200:
         logger.error("Gmail send error: %s %s", resp.status_code, resp.text)
-        raise HTTPException(status_code=resp.status_code, detail=f"Gmail error: {resp.json().get('error', {}).get('message', 'Unknown')}")
+        raise HTTPException(status_code=502, detail="Failed to send email. Please check your Gmail connection in Settings.")
 
     # Log the sent email with follow-up scheduling
     gmail_msg_id = resp.json().get("id", "")
@@ -578,7 +625,7 @@ def send_email(body: SendEmailRequest, request: Request):
             """INSERT INTO gmail_tokens (user_email, refresh_token)
                VALUES (?, ?)
                ON CONFLICT(user_email) DO UPDATE SET refresh_token = excluded.refresh_token, updated_at = CURRENT_TIMESTAMP""",
-            [user_email, gmail_refresh],
+            [user_email, enc_encrypt(gmail_refresh)],
         )
 
     return {"status": "sent", "message_id": gmail_msg_id}
@@ -617,6 +664,13 @@ class SettingsUpdate(BaseModel):
     email_signature: str | None = None
 
 
+def _mask_key(key: str) -> str:
+    """Mask an API key, showing only last 4 characters."""
+    if not key or len(key) < 8:
+        return "****" if key else ""
+    return "****" + key[-4:]
+
+
 def _get_setting(key: str, default: str = "") -> str:
     rs = execute("SELECT value FROM settings WHERE key = ?", [key])
     return rs.rows[0][0] if rs.rows else default
@@ -638,11 +692,14 @@ def get_settings():
         "follow_up_days": get_follow_up_days(),
         "sequence_length": get_sequence_length(),
         "hunter_enabled": _get_setting("hunter_enabled", "true") == "true",
-        "hunter_api_key": _get_setting("hunter_api_key") or os.environ.get("HUNTER_API_KEY", ""),
+        "hunter_api_key": _mask_key(_get_setting("hunter_api_key") or os.environ.get("HUNTER_API_KEY", "")),
+        "hunter_api_key_set": bool(_get_setting("hunter_api_key") or os.environ.get("HUNTER_API_KEY", "")),
         "apollo_enabled": _get_setting("apollo_enabled", "true") == "true",
-        "apollo_api_key": _get_setting("apollo_api_key") or os.environ.get("APOLLO_API_KEY", ""),
+        "apollo_api_key": _mask_key(_get_setting("apollo_api_key") or os.environ.get("APOLLO_API_KEY", "")),
+        "apollo_api_key_set": bool(_get_setting("apollo_api_key") or os.environ.get("APOLLO_API_KEY", "")),
         "scraping_enabled": _get_setting("scraping_enabled", "true") == "true",
-        "anthropic_api_key": _get_setting("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY", ""),
+        "anthropic_api_key": _mask_key(_get_setting("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY", "")),
+        "anthropic_api_key_set": bool(_get_setting("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY", "")),
         "test_interval_seconds": int(_get_setting("test_interval_seconds", "60")),
         "email_signature": _get_setting("email_signature", "{sender_name}\nThe Boob Bus\nhttps://theboobbus.com\n(866) 747-BOOB"),
     }
@@ -664,15 +721,20 @@ def update_settings(body: SettingsUpdate):
         _set_setting("hunter_enabled", "true" if body.hunter_enabled else "false")
     if body.hunter_api_key is not None:
         _set_setting("hunter_api_key", body.hunter_api_key)
+        logger.info("AUDIT: API key updated (hunter) by user")
     if body.apollo_enabled is not None:
         _set_setting("apollo_enabled", "true" if body.apollo_enabled else "false")
     if body.apollo_api_key is not None:
         _set_setting("apollo_api_key", body.apollo_api_key)
+        logger.info("AUDIT: API key updated (apollo) by user")
     if body.scraping_enabled is not None:
         _set_setting("scraping_enabled", "true" if body.scraping_enabled else "false")
     if body.anthropic_api_key is not None:
         _set_setting("anthropic_api_key", body.anthropic_api_key)
+        logger.info("AUDIT: API key updated (anthropic) by user")
     if body.test_interval_seconds is not None:
+        if not (5 <= body.test_interval_seconds <= 86400):
+            raise HTTPException(status_code=400, detail="Test interval must be between 5 seconds and 1 day")
         _set_setting("test_interval_seconds", str(body.test_interval_seconds))
     if body.email_signature is not None:
         _set_setting("email_signature", body.email_signature)
@@ -799,7 +861,7 @@ def start_test_sequence(req: TestSequenceRequest, request: Request):
     if not rs.rows:
         raise HTTPException(status_code=400, detail="Gmail not connected. Go to Settings first.")
 
-    refresh_token = rs.rows[0][0]
+    refresh_token = enc_decrypt(rs.rows[0][0])
     seq_length = get_sequence_length()
 
     # Build sequence types
@@ -938,10 +1000,10 @@ def gmail_authorize(body: GmailAuthRequest, request: Request):
         """INSERT INTO gmail_tokens (user_email, refresh_token)
            VALUES (?, ?)
            ON CONFLICT(user_email) DO UPDATE SET refresh_token = excluded.refresh_token, updated_at = CURRENT_TIMESTAMP""",
-        [user_email, refresh_token],
+        [user_email, enc_encrypt(refresh_token)],
     )
 
-    logger.info("Stored Gmail refresh token for %s", user_email)
+    logger.info("Stored encrypted Gmail refresh token for %s", user_email)
     return {"status": "authorized", "email": user_email}
 
 
@@ -964,13 +1026,16 @@ import uuid
 @app.get("/api/track/{tracking_id}")
 def track_email_open(tracking_id: str):
     """Tracking pixel endpoint. Logs when an email is opened."""
-    # Update the open record
-    rs = execute("SELECT sent_email_id, open_count FROM email_opens WHERE tracking_id = ?", [tracking_id])
-    if rs.rows:
-        execute(
-            "UPDATE email_opens SET opened_at = CURRENT_TIMESTAMP, open_count = open_count + 1 WHERE tracking_id = ?",
-            [tracking_id],
-        )
+    # Rate limit: max 10 opens per tracking ID per hour
+    if not check_rate_limit(f"track:{tracking_id}", 10, 3600):
+        pass  # Still return the pixel, just don't update DB
+    else:
+        rs = execute("SELECT sent_email_id, open_count FROM email_opens WHERE tracking_id = ?", [tracking_id])
+        if rs.rows:
+            execute(
+                "UPDATE email_opens SET opened_at = CURRENT_TIMESTAMP, open_count = open_count + 1 WHERE tracking_id = ?",
+                [tracking_id],
+            )
 
     # Return a 1x1 transparent GIF
     pixel = b'\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00\x21\xf9\x04\x00\x00\x00\x00\x00\x2c\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02\x44\x01\x00\x3b'
@@ -984,13 +1049,23 @@ def track_email_open(tracking_id: str):
 def run_follow_ups(request: Request):
     """Cron endpoint: check for replies and send follow-ups.
 
-    Protected by a secret token instead of user auth.
+    Protected by cron secret AND Vercel cron auth header.
     """
+    # Check Vercel's built-in cron auth header
+    vercel_cron = request.headers.get("x-vercel-cron")
+
+    # Check our custom cron secret
     cron_secret = os.environ.get("CRON_SECRET", "").strip()
     auth_header = request.headers.get("Authorization", "")
     provided = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else ""
-    if cron_secret and provided != cron_secret:
-        raise HTTPException(status_code=403, detail="Invalid cron secret")
+
+    # Must pass at least one auth check
+    vercel_ok = vercel_cron is not None  # Vercel sets this header on cron calls
+    secret_ok = cron_secret and provided == cron_secret
+
+    if not vercel_ok and not secret_ok:
+        logger.warning("Unauthorized cron attempt from %s", request.client.host if request.client else "unknown")
+        raise HTTPException(status_code=403, detail="Unauthorized")
 
     from followup_engine import process_pending_followups
     result = process_pending_followups()

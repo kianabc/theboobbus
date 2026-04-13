@@ -78,12 +78,14 @@ def get_sequence() -> list[str]:
 
 def _refresh_gmail_token(user_email: str) -> str | None:
     """Get a fresh Gmail access token using stored refresh token."""
+    from encryption import decrypt as enc_decrypt
+
     rs = execute("SELECT refresh_token FROM gmail_tokens WHERE user_email = ?", [user_email])
     if not rs.rows:
         logger.warning("No refresh token for %s", user_email)
         return None
 
-    refresh_token = rs.rows[0][0]
+    refresh_token = enc_decrypt(rs.rows[0][0])
     client_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
     client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
 

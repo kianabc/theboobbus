@@ -8,3 +8,4 @@ libsql-client
 google-auth
 python-dotenv
 anthropic
+cryptography

@@ -17,6 +17,7 @@ export default function Settings({ onBack }) {
   const [status, setStatus] = useState(null);
   const [gmail, setGmail] = useState(null);
   const [connectingGmail, setConnectingGmail] = useState(false);
+  const [changedKeys, setChangedKeys] = useState({}); // Track which API keys user edited
 
   useEffect(() => {
     fetchSettings().then(setSettings);
@@ -29,8 +30,14 @@ export default function Settings({ onBack }) {
     setSaving(true);
     setStatus(null);
     try {
-      const result = await updateSettings(settings);
+      // Only send API keys that were actually changed (not masked values)
+      const payload = { ...settings };
+      if (!changedKeys.hunter_api_key) delete payload.hunter_api_key;
+      if (!changedKeys.apollo_api_key) delete payload.apollo_api_key;
+      if (!changedKeys.anthropic_api_key) delete payload.anthropic_api_key;
+      const result = await updateSettings(payload);
       setSettings(result);
+      setChangedKeys({});
       setStatus({ type: "success", text: "Settings saved" });
     } catch {
       setStatus({ type: "error", text: "Failed to save" });
@@ -152,10 +159,13 @@ export default function Settings({ onBack }) {
               <input
                 type="password"
                 placeholder="Hunter.io API Key"
-                value={settings.hunter_api_key}
-                onChange={(e) => update("hunter_api_key", e.target.value)}
+                value={changedKeys.hunter_api_key !== undefined ? settings.hunter_api_key : settings.hunter_api_key}
+                onChange={(e) => { update("hunter_api_key", e.target.value); setChangedKeys(k => ({...k, hunter_api_key: true})); }}
                 className="api-key-input"
               />
+              {settings.hunter_api_key_set && !changedKeys.hunter_api_key && (
+                <span className="settings-hint key-status">Key is set (masked for security)</span>
+              )}
               <span className="settings-hint">Leave blank to use environment variable</span>
             </div>
           )}
@@ -178,10 +188,13 @@ export default function Settings({ onBack }) {
               <input
                 type="password"
                 placeholder="Apollo.io API Key"
-                value={settings.apollo_api_key}
-                onChange={(e) => update("apollo_api_key", e.target.value)}
+                value={changedKeys.apollo_api_key !== undefined ? settings.apollo_api_key : settings.apollo_api_key}
+                onChange={(e) => { update("apollo_api_key", e.target.value); setChangedKeys(k => ({...k, apollo_api_key: true})); }}
                 className="api-key-input"
               />
+              {settings.apollo_api_key_set && !changedKeys.apollo_api_key && (
+                <span className="settings-hint key-status">Key is set (masked for security)</span>
+              )}
               <span className="settings-hint">
                 Free tier: names are partially hidden, no emails.{" "}
                 <a href="https://www.apollo.io/pricing" target="_blank" rel="noopener noreferrer" className="upgrade-link">
@@ -224,11 +237,13 @@ export default function Settings({ onBack }) {
             <input
               type="password"
               placeholder="Anthropic API Key (sk-ant-...)"
-              value={settings.anthropic_api_key}
-              onChange={(e) => update("anthropic_api_key", e.target.value)}
+              value={changedKeys.anthropic_api_key !== undefined ? settings.anthropic_api_key : settings.anthropic_api_key}
+              onChange={(e) => { update("anthropic_api_key", e.target.value); setChangedKeys(k => ({...k, anthropic_api_key: true})); }}
               className="api-key-input"
             />
-            <span className="settings-hint">Leave blank to use environment variable</span>
+            {settings.anthropic_api_key_set && !changedKeys.anthropic_api_key && (
+              <span className="settings-hint key-status">Key is set (masked for security)</span>
+            )}
           </div>
         </div>
       </div>
