@@ -8,7 +8,9 @@ import ActivityTracker from "./components/ActivityTracker";
 import BoobBusInfo from "./components/BoobBusInfo";
 import "./App.css";
 
-const DORIS_PHOTOS = Array.from({ length: 9 }, (_, i) => `/doris/doris-${i + 1}.png`);
+// Shuffle photos on each load
+const DORIS_PHOTOS = Array.from({ length: 9 }, (_, i) => `/doris/doris-${i + 1}.png`)
+  .sort(() => Math.random() - 0.5);
 
 function LoginPage() {
   const { gsiReady, renderGoogleButton } = useAuth();
