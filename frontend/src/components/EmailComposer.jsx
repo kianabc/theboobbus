@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { generateEmail, sendEmail } from "../api";
+import { useState, useEffect } from "react";
+import { generateEmail, sendEmail, getDraft, saveDraft } from "../api";
 import "./EmailComposer.css";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
@@ -10,10 +10,52 @@ export default function EmailComposer({ companyId, contact, onSent }) {
   const [generating, setGenerating] = useState(false);
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState(null);
+  const [loadingDraft, setLoadingDraft] = useState(true);
 
-  // Parse contact name/title from source string (e.g., "Apollo.io - Erica G., HR Manager")
+  // Test email state
+  const [showTestInput, setShowTestInput] = useState(false);
+  const [testEmail, setTestEmail] = useState("");
+  const [testQueued, setTestQueued] = useState(false);
+  const [testCountdown, setTestCountdown] = useState(0);
+
   const contactName = contact.source?.match(/- (.+?),/)?.[1] || null;
   const contactTitle = contact.source?.match(/, (.+?)$/)?.[1]?.replace(/\(.*\)/, "").trim() || null;
+
+  // Load saved draft on mount
+  useEffect(() => {
+    getDraft(companyId, contact.email).then((draft) => {
+      if (draft.subject || draft.body) {
+        setSubject(draft.subject);
+        setBody(draft.body);
+      }
+      setLoadingDraft(false);
+    });
+  }, [companyId, contact.email]);
+
+  // Auto-save draft when subject/body changes (debounced)
+  useEffect(() => {
+    if (loadingDraft) return;
+    if (!subject && !body) return;
+    const timeout = setTimeout(() => {
+      saveDraft(companyId, { contact_email: contact.email, subject, body });
+    }, 1000);
+    return () => clearTimeout(timeout);
+  }, [subject, body, loadingDraft]);
+
+  // Test email countdown timer
+  useEffect(() => {
+    if (testCountdown <= 0) return;
+    const interval = setInterval(() => {
+      setTestCountdown((c) => {
+        if (c <= 1) {
+          clearInterval(interval);
+          return 0;
+        }
+        return c - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [testCountdown]);
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -35,55 +77,85 @@ export default function EmailComposer({ companyId, contact, onSent }) {
     }
   };
 
-  const handleSend = async () => {
+  const doGmailSend = (toEmail, isTest) => {
+    setSending(true);
+    setStatus(null);
+
+    const tokenClient = window.google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: "https://www.googleapis.com/auth/gmail.send",
+      callback: async (tokenResponse) => {
+        if (tokenResponse.error) {
+          setStatus({ type: "error", text: "Gmail permission denied" });
+          setSending(false);
+          return;
+        }
+        try {
+          await sendEmail(
+            {
+              to: toEmail,
+              subject: isTest ? `[TEST] ${subject}` : subject,
+              body,
+              company_id: isTest ? null : companyId,
+              email_type: "initial",
+            },
+            tokenResponse.access_token
+          );
+          if (isTest) {
+            setStatus({ type: "success", text: `Test sent to ${toEmail}` });
+            // Don't close composer, don't call onSent
+          } else {
+            setStatus({ type: "success", text: "Email sent!" });
+            if (onSent) onSent();
+          }
+        } catch (e) {
+          setStatus({ type: "error", text: "Failed to send" });
+        } finally {
+          setSending(false);
+        }
+      },
+    });
+    tokenClient.requestAccessToken();
+  };
+
+  const handleSend = () => {
     if (!subject.trim() || !body.trim()) {
       setStatus({ type: "error", text: "Subject and body are required" });
       return;
     }
-
-    setSending(true);
-    setStatus(null);
-
-    try {
-      // Request Gmail send scope via Google OAuth
-      const tokenClient = window.google.accounts.oauth2.initTokenClient({
-        client_id: GOOGLE_CLIENT_ID,
-        scope: "https://www.googleapis.com/auth/gmail.send",
-        callback: async (tokenResponse) => {
-          if (tokenResponse.error) {
-            setStatus({ type: "error", text: "Gmail permission denied" });
-            setSending(false);
-            return;
-          }
-
-          try {
-            const result = await sendEmail(
-              {
-                to: contact.email,
-                subject,
-                body,
-                company_id: companyId,
-                email_type: "initial",
-              },
-              tokenResponse.access_token
-            );
-            setStatus({ type: "success", text: "Email sent!" });
-            setSubject("");
-            setBody("");
-            if (onSent) onSent();
-          } catch (e) {
-            setStatus({ type: "error", text: "Failed to send email" });
-          } finally {
-            setSending(false);
-          }
-        },
-      });
-      tokenClient.requestAccessToken();
-    } catch (e) {
-      setStatus({ type: "error", text: "Gmail auth failed" });
-      setSending(false);
-    }
+    doGmailSend(contact.email, false);
   };
+
+  const handleTestSend = () => {
+    if (!testEmail.trim() || !subject.trim() || !body.trim()) {
+      setStatus({ type: "error", text: "Enter a test email and fill in the subject/body" });
+      return;
+    }
+    setTestQueued(true);
+    setTestCountdown(180); // 3 minutes
+    setStatus({ type: "info", text: `Test email queued. Sending in 3 minutes...` });
+
+    // Send after 3 minutes
+    setTimeout(() => {
+      doGmailSend(testEmail, true);
+      setTestQueued(false);
+      setTestCountdown(0);
+    }, 180000);
+  };
+
+  const cancelTest = () => {
+    setTestQueued(false);
+    setTestCountdown(0);
+    setStatus(null);
+  };
+
+  const formatCountdown = (secs) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  };
+
+  if (loadingDraft) return <div className="email-composer"><p>Loading draft...</p></div>;
 
   return (
     <div className="email-composer">
@@ -104,6 +176,7 @@ export default function EmailComposer({ companyId, contact, onSent }) {
         >
           {generating ? "Writing..." : "Draft with AI"}
         </button>
+        <span className="autosave-hint">Drafts auto-save</span>
       </div>
 
       <input
@@ -130,12 +203,52 @@ export default function EmailComposer({ companyId, contact, onSent }) {
         >
           {sending ? "Sending..." : "Send via Gmail"}
         </button>
-        {status && (
-          <span className={`composer-status ${status.type}`}>
-            {status.text}
-          </span>
-        )}
+
+        <div className="test-section">
+          {!showTestInput ? (
+            <button
+              className="btn btn-test"
+              onClick={() => setShowTestInput(true)}
+            >
+              Send Test
+            </button>
+          ) : (
+            <div className="test-input-row">
+              <input
+                type="email"
+                placeholder="Test email address"
+                value={testEmail}
+                onChange={(e) => setTestEmail(e.target.value)}
+                className="test-email-input"
+              />
+              {testQueued ? (
+                <>
+                  <span className="test-countdown">
+                    Sending in {formatCountdown(testCountdown)}
+                  </span>
+                  <button className="btn btn-cancel-test" onClick={cancelTest}>
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <button
+                  className="btn btn-test"
+                  onClick={handleTestSend}
+                  disabled={sending || !testEmail.trim() || !subject.trim()}
+                >
+                  Queue Test
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
+
+      {status && (
+        <div className={`composer-status ${status.type}`}>
+          {status.text}
+        </div>
+      )}
     </div>
   );
 }

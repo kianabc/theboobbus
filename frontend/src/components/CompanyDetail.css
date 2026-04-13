@@ -64,10 +64,35 @@
   font-weight: 400;
 }
 
+.edit-description {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-family: inherit;
+  resize: vertical;
+}
+
 .edit-actions {
   display: flex;
   gap: 8px;
   margin-top: 4px;
+}
+
+.btn-danger {
+  background: white;
+  color: var(--red);
+  border: 1px solid var(--red);
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 600;
+  margin-left: auto;
+}
+
+.btn-danger:hover {
+  background: #fee2e2;
 }
 
 .detail-meta {
@@ -175,6 +200,17 @@
 
 .source-cell {
   color: var(--gray-500);
+  font-size: 13px;
+}
+
+.name-cell {
+  font-weight: 600;
+  color: var(--gray-800);
+  font-size: 13px;
+}
+
+.title-cell {
+  color: var(--gray-600);
   font-size: 13px;
 }
 

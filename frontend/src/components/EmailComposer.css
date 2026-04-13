@@ -20,16 +20,15 @@
 
 .composer-controls {
   display: flex;
+  align-items: center;
   gap: 10px;
   margin-bottom: 12px;
 }
 
-.type-select {
-  padding: 8px 12px;
-  border: 1px solid var(--gray-300);
-  border-radius: var(--radius);
-  background: white;
-  font-size: 13px;
+.autosave-hint {
+  font-size: 11px;
+  color: var(--gray-400);
+  font-style: italic;
 }
 
 .btn-generate {
@@ -87,8 +86,9 @@
 .composer-actions {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
   margin-top: 12px;
+  flex-wrap: wrap;
 }
 
 .btn-send {
@@ -111,15 +111,91 @@
   cursor: not-allowed;
 }
 
+.btn-test {
+  background: white;
+  color: var(--gray-700);
+  border: 1px solid var(--gray-300);
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+
+.btn-test:hover {
+  background: var(--gray-50);
+  border-color: var(--gray-400);
+}
+
+.btn-test:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.test-section {
+  display: flex;
+  align-items: center;
+}
+
+.test-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.test-email-input {
+  padding: 8px 12px;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius);
+  font-size: 13px;
+  width: 200px;
+  outline: none;
+}
+
+.test-email-input:focus {
+  border-color: var(--primary);
+}
+
+.test-countdown {
+  font-size: 13px;
+  font-weight: 600;
+  color: #7c3aed;
+  white-space: nowrap;
+}
+
+.btn-cancel-test {
+  background: none;
+  border: 1px solid var(--red);
+  color: var(--red);
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.btn-cancel-test:hover {
+  background: #fee2e2;
+}
+
 .composer-status {
   font-size: 13px;
   font-weight: 500;
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
 }
 
 .composer-status.success {
   color: var(--green);
+  background: var(--green-light);
 }
 
 .composer-status.error {
   color: var(--red);
+  background: #fee2e2;
+}
+
+.composer-status.info {
+  color: #7c3aed;
+  background: #f3f0ff;
 }

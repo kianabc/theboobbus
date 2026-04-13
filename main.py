@@ -143,6 +143,7 @@ class CompanyUpdate(BaseModel):
     website: str | None = None
     industry: str | None = None
     city: str | None = None
+    description: str | None = None
 
 
 @app.put("/api/companies/{company_id}")
@@ -154,7 +155,7 @@ def update_company(company_id: int, body: CompanyUpdate):
 
     updates = []
     params = []
-    for field in ["name", "website", "industry", "city"]:
+    for field in ["name", "website", "industry", "city", "description"]:
         val = getattr(body, field)
         if val is not None:
             updates.append(f"{field} = ?")
@@ -168,6 +169,34 @@ def update_company(company_id: int, body: CompanyUpdate):
     rs2 = execute("SELECT id, name, website, industry, city FROM companies WHERE id = ?", [company_id])
     r = rs2.rows[0]
     return {"id": r[0], "name": r[1], "website": r[2], "industry": r[3], "city": r[4]}
+
+
+@app.delete("/api/companies/{company_id}")
+def delete_company(company_id: int):
+    """Delete a company and ALL related data."""
+    rs = execute("SELECT id, name FROM companies WHERE id = ?", [company_id])
+    if not rs.rows:
+        raise HTTPException(status_code=404, detail="Company not found")
+    name = rs.rows[0][1]
+
+    # Count related data for the response
+    contacts = execute("SELECT COUNT(*) FROM hr_emails WHERE company_id = ?", [company_id]).rows[0][0]
+    emails = execute("SELECT COUNT(*) FROM sent_emails WHERE company_id = ?", [company_id]).rows[0][0]
+    drafts = execute("SELECT COUNT(*) FROM email_drafts WHERE company_id = ?", [company_id]).rows[0][0]
+
+    # Delete everything
+    execute("DELETE FROM hr_emails WHERE company_id = ?", [company_id])
+    execute("DELETE FROM sent_emails WHERE company_id = ?", [company_id])
+    execute("DELETE FROM email_drafts WHERE company_id = ?", [company_id])
+    execute("DELETE FROM companies WHERE id = ?", [company_id])
+
+    return {
+        "status": "deleted",
+        "company": name,
+        "deleted_contacts": contacts,
+        "deleted_emails": emails,
+        "deleted_drafts": drafts,
+    }
 
 
 class AddContactRequest(BaseModel):
@@ -237,6 +266,39 @@ def delete_contact(contact_id: int):
     """Delete a contact."""
     execute("DELETE FROM hr_emails WHERE id = ?", [contact_id])
     return {"status": "deleted"}
+
+
+class SaveDraftRequest(BaseModel):
+    contact_email: str
+    subject: str
+    body: str
+
+
+@app.get("/api/companies/{company_id}/draft/{contact_email}")
+def get_draft(company_id: int, contact_email: str):
+    """Get a saved draft for a contact."""
+    rs = execute(
+        "SELECT subject, body FROM email_drafts WHERE company_id = ? AND contact_email = ?",
+        [company_id, contact_email],
+    )
+    if not rs.rows:
+        return {"subject": "", "body": ""}
+    return {"subject": rs.rows[0][0], "body": rs.rows[0][1]}
+
+
+@app.put("/api/companies/{company_id}/draft")
+def save_draft(company_id: int, body: SaveDraftRequest):
+    """Save a draft for a contact."""
+    execute(
+        """INSERT INTO email_drafts (company_id, contact_email, subject, body)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(company_id, contact_email) DO UPDATE SET
+               subject = excluded.subject,
+               body = excluded.body,
+               updated_at = CURRENT_TIMESTAMP""",
+        [company_id, body.contact_email, body.subject, body.body],
+    )
+    return {"status": "saved"}
 
 
 @app.post("/api/companies/{company_id}/scrape", response_model=list[HREmailOut])

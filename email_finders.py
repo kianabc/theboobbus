@@ -9,6 +9,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 HR_TITLES = [
+    # HR
     "human resources",
     "hr director",
     "hr manager",
@@ -21,6 +22,23 @@ HR_TITLES = [
     "recruiting manager",
     "director of recruiting",
     "head of talent",
+    # Benefits & Wellness — key decision makers for Boob Bus
+    "benefits manager",
+    "benefits director",
+    "benefits coordinator",
+    "benefits specialist",
+    "wellness manager",
+    "wellness director",
+    "wellness coordinator",
+    "health and wellness",
+    "employee wellness",
+    "employee health",
+    "employee experience",
+    "employee engagement",
+    # Office / Admin — at smaller companies
+    "office manager",
+    "office administrator",
+    "workplace experience",
 ]
 
 
@@ -89,7 +107,9 @@ def search_hunter(website: str) -> list[dict]:
             is_hr = any(
                 t in position for t in [
                     "hr", "human resource", "recruit", "talent",
-                    "people", "hiring", "staffing",
+                    "people", "hiring", "staffing", "benefits",
+                    "wellness", "employee experience", "employee health",
+                    "office manager",
                 ]
             )
 

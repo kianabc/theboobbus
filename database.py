@@ -68,6 +68,14 @@ def init_db():
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             )""",
+            """CREATE TABLE IF NOT EXISTS email_drafts (
+                company_id INTEGER NOT NULL,
+                contact_email TEXT NOT NULL,
+                subject TEXT,
+                body TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (company_id, contact_email)
+            )""",
             """CREATE TABLE IF NOT EXISTS gmail_tokens (
                 user_email TEXT PRIMARY KEY,
                 refresh_token TEXT NOT NULL,

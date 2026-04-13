@@ -94,6 +94,13 @@ export async function updateCompany(companyId, data) {
   return res.json();
 }
 
+export async function deleteCompany(companyId) {
+  const res = await authFetch(`${API}/api/companies/${companyId}`, {
+    method: "DELETE",
+  });
+  return res.json();
+}
+
 export async function deleteContact(contactId) {
   const res = await authFetch(`${API}/api/contacts/${contactId}`, {
     method: "DELETE",
@@ -104,6 +111,20 @@ export async function deleteContact(contactId) {
 export async function addContact(companyId, data) {
   const res = await authFetch(`${API}/api/companies/${companyId}/contacts`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+export async function getDraft(companyId, contactEmail) {
+  const res = await authFetch(`${API}/api/companies/${companyId}/draft/${encodeURIComponent(contactEmail)}`);
+  return res.json();
+}
+
+export async function saveDraft(companyId, data) {
+  const res = await authFetch(`${API}/api/companies/${companyId}/draft`, {
+    method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   fetchCompany, scrapeCompany, fetchOutreachHistory,
-  addContact, updateCompany, deleteContact,
+  addContact, updateCompany, deleteContact, deleteCompany,
 } from "../api";
 import EmailComposer from "./EmailComposer";
 import "./CompanyDetail.css";
@@ -65,6 +65,7 @@ export default function CompanyDetail({ companyId, onBack }) {
       website: company.website || "",
       industry: company.industry || "",
       city: company.city || "",
+      description: company.description || "",
     });
     setEditing(true);
   };
@@ -90,6 +91,42 @@ export default function CompanyDetail({ companyId, onBack }) {
     if (!confirm(`Delete contact ${email}?`)) return;
     await deleteContact(contactId);
     load();
+  };
+
+  const handleDeleteCompany = async () => {
+    const contactCount = company.hr_emails.length;
+    const outreachCount = outreach.length;
+
+    // Confirmation 1
+    if (!confirm(
+      `Are you sure you want to delete "${company.name}"?\n\n` +
+      `This will permanently delete:\n` +
+      `- ${contactCount} contact(s)\n` +
+      `- ${outreachCount} sent email(s)\n` +
+      `- All saved drafts\n\n` +
+      `This action CANNOT be undone.`
+    )) return;
+
+    // Confirmation 2
+    if (!confirm(
+      `FINAL WARNING: You are about to permanently delete "${company.name}" and ALL related data.\n\n` +
+      `Type OK below to confirm you understand this is irreversible.`
+    )) return;
+
+    // Confirmation 3
+    const typed = prompt(`Type the company name "${company.name}" to confirm deletion:`);
+    if (typed !== company.name) {
+      alert("Company name didn't match. Deletion cancelled.");
+      return;
+    }
+
+    try {
+      await deleteCompany(companyId);
+      alert(`"${company.name}" has been deleted.`);
+      onBack();
+    } catch (e) {
+      alert("Failed to delete: " + e.message);
+    }
   };
 
   if (!company) return <div className="loading">Loading...</div>;
@@ -122,11 +159,23 @@ export default function CompanyDetail({ companyId, onBack }) {
               City
               <input value={editForm.city} onChange={(e) => setEditForm({ ...editForm, city: e.target.value })} />
             </label>
+            <label>
+              Description
+              <textarea
+                value={editForm.description}
+                onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                rows={3}
+                className="edit-description"
+              />
+            </label>
             <div className="edit-actions">
               <button className="btn btn-primary" onClick={handleSaveEdit} disabled={savingEdit}>
                 {savingEdit ? "Saving..." : "Save"}
               </button>
               <button className="btn btn-secondary" onClick={() => setEditing(false)}>Cancel</button>
+              <button className="btn btn-danger" onClick={handleDeleteCompany}>
+                Delete Company
+              </button>
             </div>
           </div>
         ) : (
@@ -204,8 +253,10 @@ export default function CompanyDetail({ companyId, onBack }) {
             <thead>
               <tr>
                 <th>Email</th>
-                <th>Confidence</th>
+                <th>Name</th>
+                <th>Title</th>
                 <th>Source</th>
+                <th>Confidence</th>
                 <th>Status</th>
                 <th></th>
               </tr>
@@ -213,16 +264,35 @@ export default function CompanyDetail({ companyId, onBack }) {
             <tbody>
               {company.hr_emails.map((e, i) => {
                 const contacted = contactedEmails.has(e.email);
+                // Parse "Source - Name, Title" from source string
+                const s = e.source || "";
+                const dashIdx = s.indexOf(" - ");
+                let sourceName = "";
+                let sourceTitle = "";
+                let sourceOrigin = s;
+                if (dashIdx !== -1) {
+                  sourceOrigin = s.substring(0, dashIdx);
+                  const rest = s.substring(dashIdx + 3);
+                  const commaIdx = rest.indexOf(", ");
+                  if (commaIdx !== -1) {
+                    sourceName = rest.substring(0, commaIdx);
+                    sourceTitle = rest.substring(commaIdx + 2);
+                  } else {
+                    sourceName = rest;
+                  }
+                }
                 return (
                   <>
                     <tr key={i}>
                       <td>
                         <a href={`mailto:${e.email}`} className="email-link">{e.email}</a>
                       </td>
+                      <td className="name-cell">{sourceName || "-"}</td>
+                      <td className="title-cell">{sourceTitle || "-"}</td>
+                      <td className="source-cell">{sourceOrigin}</td>
                       <td>
                         <span className={`badge badge-${e.confidence}`}>{e.confidence}</span>
                       </td>
-                      <td className="source-cell">{e.source}</td>
                       <td>
                         {contacted ? (
                           <span className="badge badge-contacted">Contacted</span>
@@ -249,7 +319,7 @@ export default function CompanyDetail({ companyId, onBack }) {
                     </tr>
                     {composingFor === i && !contacted && (
                       <tr key={`composer-${i}`}>
-                        <td colSpan={5} className="composer-cell">
+                        <td colSpan={7} className="composer-cell">
                           <EmailComposer companyId={companyId} contact={e} onSent={load} />
                         </td>
                       </tr>
