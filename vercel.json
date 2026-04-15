@@ -5,10 +5,19 @@
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/index.py" }
   ],
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 300
+    }
+  },
   "crons": [
     {
       "path": "/api/cron/follow-ups",
-      "schedule": "0 14 * * *"
+      "schedule": "0 17 * * *"
+    },
+    {
+      "path": "/api/cron/scheduled-sends",
+      "schedule": "* * * * *"
     }
   ]
 }

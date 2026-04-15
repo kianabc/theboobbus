@@ -202,6 +202,7 @@ def generate_outreach_email(
     company_id: int | None = None,
     sender_name: str | None = None,
     days_since_last: int | None = None,
+    angle_hint: str | None = None,
 ) -> dict:
     """Generate a personalized outreach email using Claude."""
     api_key = _get_db_setting("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY", "").strip()
@@ -225,8 +226,21 @@ def generate_outreach_email(
         company_city=company_city,
     )
 
+    # Optional user-provided angle hint (e.g. "mention Q4 health fair season")
+    if angle_hint and angle_hint.strip():
+        prompt += f"\n\nANGLE / HINT FROM SENDER: {angle_hint.strip()}\nLean into this angle naturally — don't quote it back, work it in."
+
     # For follow-ups, include timing and previous emails
     if email_type != "initial":
+        # This is sent as a threaded reply — recipient sees it inline under the prior email
+        prompt += (
+            "\n\nTHIS IS A REPLY IN AN ONGOING EMAIL THREAD. "
+            "The recipient will see your message as a direct reply to their earlier conversation — "
+            "they can see the prior email(s) just below yours in Gmail. "
+            "Do NOT re-introduce yourself, re-explain what The Boob Bus is, or restate basics already covered. "
+            "Write a brief, natural continuation as if you're replying to your own earlier message. "
+            "(Still include a Subject: line in your output as usual — the system will override it with the thread's subject, but we need the format consistent.)"
+        )
         if days_since_last is not None:
             if days_since_last <= 2:
                 prompt += f"\n\nThe previous email was sent {days_since_last} day(s) ago. Reference this correctly (e.g., 'I reached out a couple days ago')."
@@ -253,8 +267,9 @@ CUSTOMER FEEDBACK & TESTIMONIALS (you may reference these, but do NOT fabricate 
 {feedback}
 """
 
+    model_id = _get_db_setting("email_model") or "claude-opus-4-6"
     message = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model=model_id,
         max_tokens=500,
         system=f"""You are writing outreach emails on behalf of The Boob Bus, a mobile mammography service in Utah.
 

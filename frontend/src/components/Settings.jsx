@@ -94,26 +94,6 @@ export default function Settings({ onBack }) {
         </div>
 
         <div className="settings-field">
-          <label>Test sequence interval</label>
-          <div className="settings-input-row">
-            <select
-              value={settings.test_interval_seconds}
-              onChange={(e) => update("test_interval_seconds", parseInt(e.target.value))}
-              className="settings-select"
-            >
-              <option value={5}>5 seconds (quick test)</option>
-              <option value={30}>30 seconds</option>
-              <option value={60}>1 minute (default)</option>
-              <option value={300}>5 minutes</option>
-              <option value={1800}>30 minutes</option>
-              <option value={7200}>2 hours</option>
-              <option value={86400}>1 day</option>
-            </select>
-            <span className="settings-hint">Time between test emails</span>
-          </div>
-        </div>
-
-        <div className="settings-field">
           <label>Sequence preview</label>
           <div className="sequence-preview">
             {labels.map((label, i) => (

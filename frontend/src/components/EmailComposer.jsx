@@ -149,7 +149,7 @@ export default function EmailComposer({ companyId, contact, onSent }) {
     }
 
     setTestRunning(true);
-    setStatus({ type: "info", text: "Starting test sequence on server..." });
+    setStatus({ type: "info", text: "Running test sequence — sends one every 20s, please wait..." });
 
     try {
       const result = await startTestSequence({
@@ -161,16 +161,30 @@ export default function EmailComposer({ companyId, contact, onSent }) {
         subject,
         body,
       });
-      if (result.status === "started") {
-        setStatus({
-          type: "success",
-          text: `Test sequence started! ${result.total_steps} emails will be sent to ${testEmail}. Initial sent now, follow-ups at configured interval. You can browse away safely.`,
-        });
+      if (result.status === "complete") {
+        const sent = result.sent ?? 0;
+        const total = result.total_steps ?? 0;
+        if (sent === total) {
+          setStatus({
+            type: "success",
+            text: `Sent all ${sent} test emails to ${testEmail} (20s apart). Check your inbox.`,
+          });
+        } else if (sent === 0) {
+          setStatus({
+            type: "error",
+            text: `All steps failed. Errors: ${(result.errors || []).join("; ") || "unknown"}`,
+          });
+        } else {
+          setStatus({
+            type: "error",
+            text: `Sent ${sent}/${total} test emails. Errors: ${(result.errors || []).join("; ") || "unknown"}`,
+          });
+        }
       } else {
-        setStatus({ type: "error", text: result.detail || "Failed to start test sequence" });
+        setStatus({ type: "error", text: result.detail || "Failed to run test sequence" });
       }
     } catch (e) {
-      setStatus({ type: "error", text: "Failed to start test. Is Gmail connected in Settings?" });
+      setStatus({ type: "error", text: "Failed to run test. Is Gmail connected in Settings?" });
     } finally {
       setTestRunning(false);
     }

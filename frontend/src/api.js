@@ -72,6 +72,28 @@ export async function addCompany(data) {
   return res.json();
 }
 
+export async function generateCompanies(filters) {
+  const res = await authFetch(`${API}/api/companies/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(filters),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to generate");
+  }
+  return res.json();
+}
+
+export async function bulkAddCompanies(companies) {
+  const res = await authFetch(`${API}/api/companies/bulk`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ companies }),
+  });
+  return res.json();
+}
+
 export async function fetchAllEmails(confidence = "") {
   const params = new URLSearchParams();
   if (confidence) params.set("confidence", confidence);
@@ -85,6 +107,32 @@ export async function generateEmail(data) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
+  return res.json();
+}
+
+export async function bulkGenerate(data) {
+  const res = await authFetch(`${API}/api/bulk-generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to generate drafts");
+  }
+  return res.json();
+}
+
+export async function bulkSend(data) {
+  const res = await authFetch(`${API}/api/bulk-send`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to send");
+  }
   return res.json();
 }
 
@@ -189,6 +237,11 @@ export async function gmailStatus() {
 
 export async function fetchSettings() {
   const res = await authFetch(`${API}/api/settings`);
+  return res.json();
+}
+
+export async function fetchEmailModels() {
+  const res = await authFetch(`${API}/api/email-models`);
   return res.json();
 }
 

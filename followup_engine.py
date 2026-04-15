@@ -2,14 +2,11 @@
 
 import os
 import logging
-import base64
-from email.mime.text import MIMEText
 from datetime import datetime, timedelta, timezone
 
 import requests as http_requests
 
 from database import execute
-from email_generator import generate_outreach_email
 
 logger = logging.getLogger(__name__)
 
@@ -146,112 +143,10 @@ def _check_for_reply(gmail_token: str, message_id: str) -> bool:
         return False
 
 
-def _send_followup_email(gmail_token: str, sent_email: dict, company: dict) -> bool:
-    """Generate and send a follow-up email."""
-    sequence = get_sequence()
-    current_type = sent_email["email_type"]
-
-    # Find current position in sequence
-    current_idx = -1
-    for i, step in enumerate(sequence):
-        if step == current_type:
-            current_idx = i
-            break
-    if current_idx == -1:
-        current_idx = 0  # fallback
-
-    next_idx = current_idx + 1
-    if next_idx >= len(sequence):
-        logger.info("Max follow-ups reached for %s -> %s", company["name"], sent_email["to_email"])
-        return False
-
-    next_type = sequence[next_idx]
-    # Map to AI email type (follow_up_1/2/3 all map to "follow_up")
-    ai_email_type = STEP_TO_EMAIL_TYPE.get(next_type, "follow_up")
-
-    # Parse contact info from source if available
-    contact_name = None
-    contact_title = None
-
-    # Generate the follow-up
-    try:
-        # Get sender name from profile
-        sender_name = sent_email["sent_by"]
-        try:
-            profile_rs = execute("SELECT full_name FROM user_profiles WHERE email = ?", [sent_email["sent_by"]])
-            if profile_rs.rows:
-                sender_name = profile_rs.rows[0][0]
-        except Exception:
-            pass
-
-        # Calculate days since last email
-        days_since = get_follow_up_days()  # approximate — it's been at least this many days
-
-        email = generate_outreach_email(
-            company_name=company["name"],
-            company_industry=company["industry"] or "Unknown",
-            company_city=company["city"] or "Utah",
-            contact_email=sent_email["to_email"],
-            contact_name=contact_name,
-            contact_title=contact_title,
-            email_type=ai_email_type,
-            company_id=sent_email["company_id"],
-            sender_name=sender_name,
-            days_since_last=days_since,
-        )
-    except Exception as e:
-        logger.error("Failed to generate follow-up: %s", e)
-        return False
-
-    # Send via Gmail
-    msg = MIMEText(email["body"])
-    msg["To"] = sent_email["to_email"]
-    msg["Subject"] = email["subject"]
-    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
-
-    try:
-        resp = http_requests.post(
-            "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
-            headers={
-                "Authorization": f"Bearer {gmail_token}",
-                "Content-Type": "application/json",
-            },
-            json={"raw": raw},
-            timeout=15,
-        )
-        if resp.status_code != 200:
-            logger.error("Gmail send failed: %s", resp.text)
-            return False
-
-        gmail_msg_id = resp.json().get("id", "")
-
-        # Calculate next follow-up
-        follow_up_days = get_follow_up_days()
-        next_follow_up = None
-        if next_type != "final":
-            next_follow_up = (datetime.now(timezone.utc) + timedelta(days=follow_up_days)).isoformat()
-
-        # Log the sent follow-up
-        execute(
-            """INSERT INTO sent_emails
-               (company_id, to_email, subject, body, sent_by, email_type, gmail_message_id, next_follow_up_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            [
-                sent_email["company_id"], sent_email["to_email"],
-                email["subject"], email["body"], sent_email["sent_by"],
-                next_type, gmail_msg_id, next_follow_up,
-            ],
-        )
-
-        # Mark the original email as no longer needing follow-up
-        execute("UPDATE sent_emails SET next_follow_up_at = NULL WHERE id = ?", [sent_email["id"]])
-
-        logger.info("Sent %s follow-up to %s at %s", next_type, sent_email["to_email"], company["name"])
-        return True
-
-    except Exception as e:
-        logger.error("Failed to send follow-up: %s", e)
-        return False
+# Follow-ups are enqueued into scheduled_sends by process_pending_followups
+# and sent by the per-minute cron (in main.py, kind='followup' branch).
+# The old synchronous _send_followup_email is gone — it would timeout on
+# any non-trivial batch.
 
 
 def process_pending_followups() -> dict:
@@ -290,23 +185,58 @@ def process_pending_followups() -> dict:
             senders[sender_email] = []
         senders[sender_email].append((sent, company))
 
+    sequence = get_sequence()
+    now_iso = datetime.now(timezone.utc).isoformat()
+
     for sender_email, items in senders.items():
-        # Get a fresh Gmail token for this sender
+        # Get a fresh Gmail token for this sender (only for reply-checking)
         gmail_token = _refresh_gmail_token(sender_email)
         if not gmail_token:
             logger.warning("Cannot get Gmail token for %s, skipping %d follow-ups", sender_email, len(items))
             continue
 
         for sent, company in items:
-            # Check if the recipient replied
+            # Check if the recipient replied (cheap API call, keep it synchronous)
             if _check_for_reply(gmail_token, sent["gmail_message_id"]):
                 execute("UPDATE sent_emails SET replied = 1, next_follow_up_at = NULL WHERE id = ?", [sent["id"]])
                 results["replies_found"] += 1
                 logger.info("Reply detected from %s at %s", sent["to_email"], company["name"])
                 continue
 
-            # No reply — send follow-up
-            if _send_followup_email(gmail_token, sent, company):
-                results["followed_up"] += 1
+            # Determine the next step in the sequence
+            current_idx = -1
+            for i, step in enumerate(sequence):
+                if step == sent["email_type"]:
+                    current_idx = i
+                    break
+            if current_idx == -1:
+                current_idx = 0
+
+            next_idx = current_idx + 1
+            if next_idx >= len(sequence):
+                # No further steps — clear follow-up marker and move on
+                execute("UPDATE sent_emails SET next_follow_up_at = NULL WHERE id = ?", [sent["id"]])
+                continue
+
+            next_type = sequence[next_idx]
+
+            # Enqueue with send_at=now. The per-minute cron drains the queue,
+            # sleeping 15–30s between each send within a tick for real Gmail-
+            # visible spacing.
+            execute(
+                """INSERT INTO scheduled_sends
+                   (user_email, test_email, company_id, contact_email, contact_name,
+                    contact_title, email_type, step_num, total_steps, send_at, status, kind)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?, 'pending', 'followup')""",
+                [
+                    sender_email, sent["to_email"], sent["company_id"], sent["to_email"],
+                    None, None, next_type, now_iso,
+                ],
+            )
+
+            # Clear the parent's follow-up marker so we don't re-enqueue tomorrow
+            execute("UPDATE sent_emails SET next_follow_up_at = NULL WHERE id = ?", [sent["id"]])
+
+            results["followed_up"] += 1
 
     return results

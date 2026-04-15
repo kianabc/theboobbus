@@ -172,6 +172,36 @@
   border-collapse: collapse;
 }
 
+.checkbox-col {
+  width: 36px;
+  text-align: center;
+  padding: 8px 4px !important;
+}
+
+.checkbox-col input[type="checkbox"] {
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+}
+
+.bulk-action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  background: rgba(214, 84, 142, 0.08);
+  border: 1px solid rgba(214, 84, 142, 0.25);
+  border-radius: var(--radius);
+  font-size: 14px;
+  color: var(--gray-800);
+}
+
+.bulk-action-bar-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .email-table th {
   text-align: left;
   font-size: 12px;

@@ -4,7 +4,10 @@ import {
   addContact, updateCompany, deleteContact, deleteCompany, updateContact,
 } from "../api";
 import EmailComposer from "./EmailComposer";
+import BulkComposer from "./BulkComposer";
 import "./CompanyDetail.css";
+
+const BULK_MAX = 5;
 
 export default function CompanyDetail({ companyId, onBack }) {
   const [company, setCompany] = useState(null);
@@ -20,6 +23,8 @@ export default function CompanyDetail({ companyId, onBack }) {
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({});
   const [savingEdit, setSavingEdit] = useState(false);
+  const [selectedEmails, setSelectedEmails] = useState(new Set());
+  const [showBulkComposer, setShowBulkComposer] = useState(false);
 
   const load = () => {
     fetchCompany(companyId).then(setCompany);
@@ -260,6 +265,25 @@ export default function CompanyDetail({ companyId, onBack }) {
       {/* ── Contacts Table ── */}
       <div className="emails-section">
         <h3>HR Contacts ({company.hr_emails.length})</h3>
+        {selectedEmails.size > 0 && (
+          <div className="bulk-action-bar">
+            <span>
+              <strong>{selectedEmails.size}</strong> selected
+              {selectedEmails.size >= BULK_MAX && ` (max ${BULK_MAX})`}
+            </span>
+            <div className="bulk-action-bar-actions">
+              <button className="btn btn-secondary btn-sm" onClick={() => setSelectedEmails(new Set())}>
+                Clear
+              </button>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => setShowBulkComposer(true)}
+              >
+                Compose to {selectedEmails.size}
+              </button>
+            </div>
+          </div>
+        )}
         {company.hr_emails.length === 0 ? (
           <p className="no-emails">
             No contacts found yet. Click "Find HR Contacts" or "+ Add Contact".
@@ -268,6 +292,7 @@ export default function CompanyDetail({ companyId, onBack }) {
           <table className="email-table">
             <thead>
               <tr>
+                <th className="checkbox-col"></th>
                 <th>Name</th>
                 <th>Email</th>
                 <th>Title</th>
@@ -302,6 +327,7 @@ export default function CompanyDetail({ companyId, onBack }) {
                 if (isEditing) {
                   return (
                     <tr key={i} className="editing-row">
+                      <td className="checkbox-col"></td>
                       <td><input value={editContact.name} onChange={(ev) => setEditContact({...editContact, name: ev.target.value})} className="inline-edit" placeholder="Name" /></td>
                       <td><input value={editContact.email} onChange={(ev) => setEditContact({...editContact, email: ev.target.value})} className="inline-edit" /></td>
                       <td><input value={editContact.title} onChange={(ev) => setEditContact({...editContact, title: ev.target.value})} className="inline-edit" placeholder="Title" /></td>
@@ -326,6 +352,10 @@ export default function CompanyDetail({ companyId, onBack }) {
                 const isOpen = composingFor === i;
                 const isUnverified = e.email?.startsWith("upgrade-apollo-for-") || e.confidence === "unverified";
 
+                const selectable = !contacted && !isUnverified;
+                const isSelected = selectedEmails.has(e.email);
+                const atMax = selectedEmails.size >= BULK_MAX && !isSelected;
+
                 return (
                   <>
                     <tr
@@ -337,6 +367,24 @@ export default function CompanyDetail({ companyId, onBack }) {
                         }
                       }}
                     >
+                      <td className="checkbox-col" onClick={(ev) => ev.stopPropagation()}>
+                        {selectable && (
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            disabled={atMax}
+                            onChange={(ev) => {
+                              setSelectedEmails((prev) => {
+                                const next = new Set(prev);
+                                if (ev.target.checked) next.add(e.email);
+                                else next.delete(e.email);
+                                return next;
+                              });
+                            }}
+                            title={atMax ? `Max ${BULK_MAX} contacts` : "Select for bulk send"}
+                          />
+                        )}
+                      </td>
                       <td className="name-cell">{sourceName || "-"}</td>
                       <td>
                         {isUnverified ? (
@@ -391,7 +439,7 @@ export default function CompanyDetail({ companyId, onBack }) {
                     </tr>
                     {isOpen && !contacted && (
                       <tr key={`composer-${i}`}>
-                        <td colSpan={7} className="composer-cell">
+                        <td colSpan={8} className="composer-cell">
                           <EmailComposer companyId={companyId} contact={e} onSent={load} />
                         </td>
                       </tr>
@@ -443,6 +491,38 @@ export default function CompanyDetail({ companyId, onBack }) {
             </tbody>
           </table>
         </div>
+      )}
+
+      {showBulkComposer && (
+        <BulkComposer
+          companyId={companyId}
+          contacts={sortedContacts
+            .filter((e) => selectedEmails.has(e.email))
+            .map((e) => {
+              // Parse name/title from source, same as the table does
+              const s = e.source || "";
+              const dashIdx = s.indexOf(" - ");
+              let name = "";
+              let title = "";
+              if (dashIdx !== -1) {
+                const rest = s.substring(dashIdx + 3);
+                const commaIdx = rest.indexOf(", ");
+                if (commaIdx !== -1) {
+                  name = rest.substring(0, commaIdx);
+                  title = rest.substring(commaIdx + 2);
+                } else {
+                  name = rest;
+                }
+              }
+              return { email: e.email, name, title };
+            })}
+          onClose={() => setShowBulkComposer(false)}
+          onSent={() => {
+            setSelectedEmails(new Set());
+            setShowBulkComposer(false);
+            load();
+          }}
+        />
       )}
     </div>
   );

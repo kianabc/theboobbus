@@ -95,6 +95,33 @@ class CompanyCreate(BaseModel):
     website: str | None = None
     industry: str | None = None
     city: str | None = "Utah"
+    county: str | None = None
+
+
+class GenerateCompaniesRequest(BaseModel):
+    count: int = 10
+    city: str | None = None
+    county: str | None = None
+    industry: str | None = None
+    min_employees: int | None = 50
+    prioritize_women: bool = False
+    avoid_keywords: list[str] = []
+
+
+class ProposedCompany(BaseModel):
+    name: str
+    website: str | None = None
+    industry: str | None = None
+    city: str | None = None
+    county: str | None = None
+    estimated_employees: str | None = None
+    reasoning: str | None = None
+    website_verified: bool = False
+    already_exists: bool = False
+
+
+class BulkAddRequest(BaseModel):
+    companies: list[CompanyCreate]
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -173,13 +200,106 @@ def get_company(company_id: int):
 def add_company(body: CompanyCreate):
     """Add a new company to track."""
     rs = execute(
-        "INSERT INTO companies (name, website, industry, city) VALUES (?, ?, ?, ?)",
-        [body.name, body.website, body.industry, body.city],
+        "INSERT INTO companies (name, website, industry, city, county) VALUES (?, ?, ?, ?, ?)",
+        [body.name, body.website, body.industry, body.city, body.county],
     )
     company_id = rs.last_insert_rowid
     rs2 = execute("SELECT id, name, website, industry, city FROM companies WHERE id = ?", [company_id])
     r = rs2.rows[0]
     return {"id": r[0], "name": r[1], "website": r[2], "industry": r[3], "city": r[4]}
+
+
+@app.post("/api/companies/generate", response_model=list[ProposedCompany])
+def generate_company_suggestions(body: GenerateCompaniesRequest, request: Request):
+    """Ask Claude to propose Utah companies matching filters. Does NOT insert."""
+    from company_generator import generate_companies, verify_websites_parallel
+
+    user = get_current_user(request)
+    if not check_rate_limit(f"gen_co:{user['email']}", 10, 3600):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded. Max 10 company generations per hour.")
+
+    count = max(1, min(25, int(body.count or 10)))
+
+    # Pull existing names (lowered) so we can ask Claude to avoid them AND flag dupes client-side
+    rs = execute("SELECT name FROM companies")
+    all_names = [r[0] for r in rs.rows]
+    existing_lower = {n.lower().strip() for n in all_names}
+
+    try:
+        proposed = generate_companies(
+            count=count,
+            city=body.city or None,
+            county=body.county or None,
+            industry=body.industry or None,
+            min_employees=body.min_employees,
+            prioritize_women=body.prioritize_women,
+            avoid_keywords=body.avoid_keywords or [],
+            existing_names=all_names,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("Company generation failed")
+        raise HTTPException(status_code=500, detail=f"Generation failed: {e}")
+
+    # Deduplicate Claude's output by lowered name
+    seen = set()
+    cleaned = []
+    for c in proposed:
+        nm = (c.get("name") or "").strip()
+        if not nm or nm.lower() in seen:
+            continue
+        seen.add(nm.lower())
+        cleaned.append(c)
+
+    # Verify websites in parallel
+    urls = [(c.get("website") or "") for c in cleaned]
+    verified = verify_websites_parallel(urls) if urls else []
+
+    results = []
+    for c, ok in zip(cleaned, verified):
+        nm = (c.get("name") or "").strip()
+        results.append(ProposedCompany(
+            name=nm,
+            website=c.get("website"),
+            industry=c.get("industry"),
+            city=c.get("city"),
+            county=c.get("county"),
+            estimated_employees=c.get("estimated_employees"),
+            reasoning=c.get("reasoning"),
+            website_verified=bool(ok),
+            already_exists=nm.lower() in existing_lower,
+        ))
+    return results
+
+
+@app.post("/api/companies/bulk", status_code=201)
+def bulk_add_companies(body: BulkAddRequest, request: Request):
+    """Insert multiple approved companies. Skips exact-name duplicates."""
+    get_current_user(request)  # auth
+
+    if not body.companies:
+        return {"added": 0, "skipped": 0, "ids": []}
+
+    # Fetch existing names to skip dupes
+    rs = execute("SELECT name FROM companies")
+    existing = {r[0].lower().strip() for r in rs.rows}
+
+    added_ids = []
+    skipped = 0
+    for c in body.companies:
+        nm = (c.name or "").strip()
+        if not nm or nm.lower() in existing:
+            skipped += 1
+            continue
+        rs = execute(
+            "INSERT INTO companies (name, website, industry, city, county) VALUES (?, ?, ?, ?, ?)",
+            [nm, c.website, c.industry, c.city or "Utah", c.county],
+        )
+        added_ids.append(rs.last_insert_rowid)
+        existing.add(nm.lower())
+
+    return {"added": len(added_ids), "skipped": skipped, "ids": added_ids}
 
 
 class CompanyUpdate(BaseModel):
@@ -511,6 +631,229 @@ def generate_email(body: GenerateEmailRequest, request: Request):
     return result
 
 
+# ── Bulk compose (multi-contact outreach) ──────────────────────────────────────
+
+class BulkContact(BaseModel):
+    email: str
+    name: str | None = None
+    title: str | None = None
+
+
+class BulkGenerateRequest(BaseModel):
+    company_id: int
+    contacts: list[BulkContact]
+    angle_hint: str | None = None
+    email_type: str = "initial"
+
+
+class BulkDraft(BaseModel):
+    contact_email: str
+    contact_name: str | None = None
+    contact_title: str | None = None
+    subject: str
+    body: str
+
+
+@app.post("/api/bulk-generate", response_model=list[BulkDraft])
+def bulk_generate_emails(body: BulkGenerateRequest, request: Request):
+    """Generate personalized drafts for multiple contacts in parallel."""
+    from email_generator import generate_outreach_email
+    from concurrent.futures import ThreadPoolExecutor
+
+    user = get_current_user(request)
+
+    if len(body.contacts) == 0:
+        raise HTTPException(status_code=400, detail="No contacts provided")
+    if len(body.contacts) > 5:
+        raise HTTPException(status_code=400, detail="Maximum 5 contacts per bulk generation")
+
+    # Rate limit budgets against the same bucket as single generation.
+    # Reserve N slots up front — fail fast if we can't.
+    for _ in range(len(body.contacts)):
+        if not check_rate_limit(f"gen:{user['email']}", 20, 3600):
+            raise HTTPException(
+                status_code=429,
+                detail=f"Rate limit would be exceeded. Max 20 AI generations per hour; only partial reservation possible.",
+            )
+
+    co_rs = execute("SELECT name, industry, city FROM companies WHERE id = ?", [body.company_id])
+    if not co_rs.rows:
+        raise HTTPException(status_code=404, detail="Company not found")
+    co = co_rs.rows[0]
+
+    profile_rs = execute("SELECT full_name FROM user_profiles WHERE email = ?", [user["email"]])
+    sender_name = profile_rs.rows[0][0] if profile_rs.rows else user.get("name", "")
+
+    def gen_one(contact: BulkContact) -> BulkDraft | None:
+        try:
+            result = generate_outreach_email(
+                company_name=co[0],
+                company_industry=co[1] or "Unknown",
+                company_city=co[2] or "Utah",
+                contact_email=contact.email,
+                contact_name=contact.name,
+                contact_title=contact.title,
+                email_type=body.email_type,
+                company_id=body.company_id,
+                sender_name=sender_name,
+                angle_hint=body.angle_hint,
+            )
+            # Save draft so it persists if the user navigates away
+            execute(
+                """INSERT INTO email_drafts (company_id, contact_email, subject, body, updated_at)
+                   VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(company_id, contact_email)
+                   DO UPDATE SET subject = excluded.subject, body = excluded.body, updated_at = CURRENT_TIMESTAMP""",
+                [body.company_id, contact.email, result["subject"], result["body"]],
+            )
+            return BulkDraft(
+                contact_email=contact.email,
+                contact_name=contact.name,
+                contact_title=contact.title,
+                subject=result["subject"],
+                body=result["body"],
+            )
+        except Exception as e:
+            logger.error("Bulk generate failed for %s: %s", contact.email, e)
+            return None
+
+    with ThreadPoolExecutor(max_workers=min(5, len(body.contacts))) as pool:
+        results = list(pool.map(gen_one, body.contacts))
+
+    drafts = [r for r in results if r is not None]
+    if not drafts:
+        raise HTTPException(status_code=502, detail="All generations failed")
+    return drafts
+
+
+class BulkSendItem(BaseModel):
+    contact_email: str
+    contact_name: str | None = None
+    contact_title: str | None = None
+    subject: str
+    body: str
+
+
+class BulkSendRequest(BaseModel):
+    company_id: int
+    emails: list[BulkSendItem]
+
+
+@app.post("/api/bulk-send")
+def bulk_send(body: BulkSendRequest, request: Request):
+    """Schedule bulk sends with randomized jitter (30–120s between emails).
+
+    First email fires immediately (synchronously so the user sees an instant
+    success signal). Remaining emails are scheduled in `scheduled_sends` and
+    processed by the per-minute cron. Jitter helps avoid spam-filter flags.
+    """
+    from datetime import datetime, timedelta, timezone
+    from gmail_sender import send_gmail_message
+    import requests as http_requests
+
+    user = get_current_user(request)
+
+    if not body.emails:
+        raise HTTPException(status_code=400, detail="No emails provided")
+    if len(body.emails) > 5:
+        raise HTTPException(status_code=400, detail="Maximum 5 emails per bulk send")
+
+    # Rate limit — reserve N slots now so we don't schedule more than allowed/hr
+    for _ in range(len(body.emails)):
+        if not check_rate_limit(f"send:{user['email']}", 10, 3600):
+            raise HTTPException(
+                status_code=429,
+                detail="Rate limit would be exceeded. Max 10 emails per hour per user.",
+            )
+
+    # Get the user's Gmail access token (same pattern as /api/send-email)
+    rs = execute("SELECT refresh_token FROM gmail_tokens WHERE user_email = ?", [user["email"]])
+    if not rs.rows:
+        raise HTTPException(status_code=400, detail="Gmail not connected. Go to Settings.")
+
+    refresh_token = enc_decrypt(rs.rows[0][0])
+    client_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+    client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
+    tok_resp = http_requests.post("https://oauth2.googleapis.com/token", data={
+        "client_id": client_id, "client_secret": client_secret,
+        "refresh_token": refresh_token, "grant_type": "refresh_token",
+    }, timeout=10)
+    if tok_resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="Failed to refresh Gmail token. Reconnect Gmail in Settings.")
+    access_token = tok_resp.json().get("access_token")
+
+    # Send the FIRST email synchronously
+    first = body.emails[0]
+    first_result = send_gmail_message(
+        access_token=access_token,
+        to=first.contact_email,
+        subject=first.subject,
+        body=first.body,
+    )
+
+    immediate_results: list[dict] = []
+
+    if first_result["ok"]:
+        # Log to sent_emails for follow-up tracking
+        from followup_engine import get_follow_up_days
+        follow_up_days = get_follow_up_days()
+        next_follow_up = (datetime.now(timezone.utc) + timedelta(days=follow_up_days)).isoformat()
+        execute(
+            """INSERT INTO sent_emails
+               (company_id, to_email, subject, body, sent_by, email_type, gmail_message_id,
+                thread_id, message_id_header, next_follow_up_at)
+               VALUES (?, ?, ?, ?, ?, 'initial', ?, ?, ?, ?)""",
+            [
+                body.company_id, first.contact_email, first.subject, first.body,
+                user["email"], first_result["gmail_message_id"],
+                first_result["thread_id"], first_result["message_id_header"],
+                next_follow_up,
+            ],
+        )
+        # Clear the draft since it's been sent
+        execute(
+            "DELETE FROM email_drafts WHERE company_id = ? AND contact_email = ?",
+            [body.company_id, first.contact_email],
+        )
+        immediate_results.append({"contact_email": first.contact_email, "status": "sent"})
+    else:
+        immediate_results.append({
+            "contact_email": first.contact_email,
+            "status": "failed",
+            "error": first_result["error"],
+        })
+
+    # Schedule remaining emails. No pre-computed send_at jitter — the cron
+    # applies 15–30s sleep between sends within each tick. Simpler and gives
+    # true spacing in Gmail's eyes.
+    scheduled = 0
+    now = datetime.now(timezone.utc)
+    for item in body.emails[1:]:
+        send_at = now  # due immediately; cron drains with per-email sleep
+        execute(
+            """INSERT INTO scheduled_sends
+               (user_email, test_email, company_id, contact_email, contact_name,
+                contact_title, email_type, step_num, total_steps, send_at, status,
+                kind, subject, body)
+               VALUES (?, ?, ?, ?, ?, ?, 'initial', 1, 1, ?, 'pending', 'production', ?, ?)""",
+            [
+                user["email"], item.contact_email, body.company_id, item.contact_email,
+                item.contact_name, item.contact_title,
+                send_at.isoformat(), item.subject, item.body,
+            ],
+        )
+        scheduled += 1
+
+    # Rough ETA: cron sends ~10/min with jitter, so N emails take ~N * 22s / 10 min
+    estimated_seconds = scheduled * 25
+    return {
+        "status": "queued",
+        "sent_immediately": immediate_results,
+        "scheduled": scheduled,
+        "estimated_last_send_seconds": estimated_seconds,
+    }
+
+
 @app.post("/api/send-email")
 def send_email(body: SendEmailRequest, request: Request):
     """Send an email via Gmail.
@@ -549,9 +892,7 @@ def send_email(body: SendEmailRequest, request: Request):
     if not gmail_token:
         raise HTTPException(status_code=400, detail="Gmail not connected. Go to Settings to connect your Gmail account.")
 
-    import base64
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
+    from gmail_sender import send_gmail_message, get_thread_anchor
 
     # Generate tracking pixel
     tracking_id = str(uuid.uuid4())
@@ -559,55 +900,59 @@ def send_email(body: SendEmailRequest, request: Request):
     tracking_url = f"{base_url}/api/track/{tracking_id}"
     tracking_pixel = f'<img src="{tracking_url}" width="1" height="1" style="display:none" />'
 
-    # Sanitize headers — strip newlines to prevent header injection
-    safe_subject = body.subject.replace("\r", "").replace("\n", " ").strip()[:200]
-    safe_to = body.to.replace("\r", "").replace("\n", "").strip()
+    # If this is a follow-up and we have an existing thread for this contact,
+    # send as a proper threaded reply (In-Reply-To + threadId + "Re: root").
+    email_type = getattr(body, "email_type", "initial") or "initial"
+    anchor = None
+    if email_type != "initial" and body.company_id:
+        anchor = get_thread_anchor(body.company_id, body.to)
 
-    # Build HTML email with tracking pixel
+    subject_to_send = body.subject
+    if anchor and anchor.get("root_subject"):
+        subject_to_send = anchor["root_subject"]  # Gmail sender will add "Re: "
+
+    # Build HTML body with tracking pixel (preserves line breaks)
     html_body = body.body.replace("\n", "<br>") + tracking_pixel
-    msg = MIMEMultipart("alternative")
-    msg["To"] = safe_to
-    msg["Subject"] = safe_subject
-    msg.attach(MIMEText(body.body, "plain"))
-    msg.attach(MIMEText(html_body, "html"))
-    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
 
-    # Send via Gmail API
-    import requests as http_requests
-    resp = http_requests.post(
-        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
-        headers={
-            "Authorization": f"Bearer {gmail_token}",
-            "Content-Type": "application/json",
-        },
-        json={"raw": raw},
-        timeout=15,
+    result = send_gmail_message(
+        access_token=gmail_token,
+        to=body.to,
+        subject=subject_to_send,
+        body=body.body,
+        html_body=html_body,
+        reply_to_message_id=anchor["message_id_header"] if anchor else None,
+        reply_to_thread_id=anchor["thread_id"] if anchor else None,
     )
 
-    if resp.status_code != 200:
-        logger.error("Gmail send error: %s %s", resp.status_code, resp.text)
+    if not result["ok"]:
+        logger.error("Gmail send error: %s", result["error"])
         raise HTTPException(status_code=502, detail="Failed to send email. Please check your Gmail connection in Settings.")
 
     # Log the sent email with follow-up scheduling
-    gmail_msg_id = resp.json().get("id", "")
+    gmail_msg_id = result["gmail_message_id"] or ""
+    thread_id = result["thread_id"]
+    message_id_header = result["message_id_header"]
     user_email = get_current_user(request).get("email", "unknown")
 
     from followup_engine import get_follow_up_days
     from datetime import datetime, timedelta, timezone
     follow_up_days = get_follow_up_days()
-    email_type = getattr(body, "email_type", "initial") or "initial"
     next_follow_up = None
     if email_type != "final":
         next_follow_up = (datetime.now(timezone.utc) + timedelta(days=follow_up_days)).isoformat()
+
+    # Store the subject we ACTUALLY sent (after Re: prefix logic), so replies keep threading.
+    stored_subject = f"Re: {anchor['root_subject']}" if anchor and anchor.get("root_subject") else body.subject
 
     sent_email_id = None
     if body.company_id:
         rs_insert = execute(
             """INSERT INTO sent_emails
-               (company_id, to_email, subject, body, sent_by, email_type, gmail_message_id, next_follow_up_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            [body.company_id, body.to, body.subject, body.body,
-             user_email, email_type, gmail_msg_id, next_follow_up],
+               (company_id, to_email, subject, body, sent_by, email_type, gmail_message_id,
+                thread_id, message_id_header, next_follow_up_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [body.company_id, body.to, stored_subject, body.body,
+             user_email, email_type, gmail_msg_id, thread_id, message_id_header, next_follow_up],
         )
         sent_email_id = rs_insert.last_insert_rowid
 
@@ -660,8 +1005,8 @@ class SettingsUpdate(BaseModel):
     apollo_api_key: str | None = None
     scraping_enabled: bool | None = None
     anthropic_api_key: str | None = None
-    test_interval_seconds: int | None = None
     email_signature: str | None = None
+    email_model: str | None = None
 
 
 def _mask_key(key: str) -> str:
@@ -700,9 +1045,42 @@ def get_settings():
         "scraping_enabled": _get_setting("scraping_enabled", "true") == "true",
         "anthropic_api_key": _mask_key(_get_setting("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY", "")),
         "anthropic_api_key_set": bool(_get_setting("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY", "")),
-        "test_interval_seconds": int(_get_setting("test_interval_seconds", "60")),
         "email_signature": _get_setting("email_signature", "{sender_name}\nThe Boob Bus\nhttps://theboobbus.com\n(866) 747-BOOB"),
+        "email_model": _get_setting("email_model", "claude-opus-4-6"),
     }
+
+
+# Catalog of selectable models for email generation (exposed to the UI).
+# Costs are rough per-email estimates (~1800 input tokens + 500 output) in USD.
+EMAIL_MODELS = [
+    {
+        "id": "claude-opus-4-6",
+        "name": "Claude Opus 4.6",
+        "tier": "Top quality",
+        "cost_per_email": 0.06,
+        "description": "Most nuanced tone, best at avoiding AI-templated phrasing. Best for real prospect outreach.",
+    },
+    {
+        "id": "claude-sonnet-4-6",
+        "name": "Claude Sonnet 4.6",
+        "tier": "Balanced",
+        "cost_per_email": 0.013,
+        "description": "Strong quality at ~4x lower cost. Good default for high-volume outreach.",
+    },
+    {
+        "id": "claude-haiku-4-5-20251001",
+        "name": "Claude Haiku 4.5",
+        "tier": "Fast & cheap",
+        "cost_per_email": 0.004,
+        "description": "Fastest and cheapest. Noticeably more template-y — fine for internal tests.",
+    },
+]
+
+
+@app.get("/api/email-models")
+def list_email_models():
+    """List available models for email generation with cost estimates."""
+    return EMAIL_MODELS
 
 
 @app.put("/api/settings")
@@ -732,12 +1110,14 @@ def update_settings(body: SettingsUpdate):
     if body.anthropic_api_key is not None:
         _set_setting("anthropic_api_key", body.anthropic_api_key)
         logger.info("AUDIT: API key updated (anthropic) by user")
-    if body.test_interval_seconds is not None:
-        if not (5 <= body.test_interval_seconds <= 86400):
-            raise HTTPException(status_code=400, detail="Test interval must be between 5 seconds and 1 day")
-        _set_setting("test_interval_seconds", str(body.test_interval_seconds))
     if body.email_signature is not None:
         _set_setting("email_signature", body.email_signature)
+    if body.email_model is not None:
+        valid_ids = {m["id"] for m in EMAIL_MODELS}
+        if body.email_model not in valid_ids:
+            raise HTTPException(status_code=400, detail=f"Unknown email_model. Must be one of: {sorted(valid_ids)}")
+        _set_setting("email_model", body.email_model)
+        logger.info("AUDIT: email model changed to %s", body.email_model)
     return get_settings()
 
 
@@ -834,8 +1214,6 @@ def get_prompts():
 
 # ── Test Sequence (server-side) ────────────────────────────────────────────────
 
-import threading
-
 
 class TestSequenceRequest(BaseModel):
     company_id: int
@@ -891,61 +1269,86 @@ def start_test_sequence(req: TestSequenceRequest, request: Request):
             return resp.json().get("access_token")
         return None
 
-    def _send_gmail(access_token, to, subj, body_text):
-        import requests as http_requests
-        import base64
-        from email.mime.text import MIMEText
-        msg = MIMEText(body_text)
-        msg["To"] = to
-        msg["Subject"] = subj
-        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
-        resp = http_requests.post(
-            "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
-            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
-            json={"raw": raw}, timeout=15,
-        )
-        return resp.status_code == 200
-
-    # Get test interval from settings
-    test_interval = int(_get_setting("test_interval_seconds", "60"))
+    # Hardcoded: test-sequence emails are 20 seconds apart. Synchronous in the
+    # request so spacing is real. Worst case with 5 emails: 4 gaps × 20s + 5
+    # sends × ~2s ≈ 90s, comfortably under the 300s maxDuration.
+    TEST_INTERVAL_SECONDS = 20
+    import time as _time
 
     # Get sender name
     profile_rs = execute("SELECT full_name FROM user_profiles WHERE email = ?", [user["email"]])
     sender_name = profile_rs.rows[0][0] if profile_rs.rows else user.get("name", "")
 
-    def run_sequence():
-        # Step 1: Send initial immediately
-        token = _get_access_token()
-        if not token:
-            logger.error("Test sequence: failed to get Gmail token")
-            return
-        _send_gmail(token, req.test_email, f"[TEST 1/{seq_length}] {req.subject}", req.body)
-        logger.info("Test sequence: sent step 1/%d to %s", seq_length, req.test_email)
+    from gmail_sender import send_gmail_message
+    sent_count = 0
+    errors: list[str] = []
 
-        # Steps 2+: at configured interval
-        for idx, email_type in enumerate(follow_ups):
-            _time.sleep(test_interval)
-            step = idx + 2
-            try:
-                draft = generate_outreach_email(
-                    company_name=company[0], company_industry=company[1] or "Unknown",
-                    company_city=company[2] or "Utah", contact_email=req.contact_email,
-                    contact_name=req.contact_name, contact_title=req.contact_title,
-                    email_type=email_type, company_id=req.company_id,
-                    sender_name=sender_name, days_since_last=0,
-                )
-                token = _get_access_token()
-                if token:
-                    _send_gmail(token, req.test_email, f"[TEST {step}/{seq_length}] {draft['subject']}", draft["body"])
-                    logger.info("Test sequence: sent step %d/%d to %s", step, seq_length, req.test_email)
-            except Exception as e:
-                logger.error("Test sequence step %d failed: %s", step, e)
+    token = _get_access_token()
+    if not token:
+        raise HTTPException(status_code=400, detail="Failed to refresh Gmail token. Reconnect Gmail in Settings.")
 
-    # Run in background thread so the API returns immediately
-    thread = threading.Thread(target=run_sequence, daemon=True)
-    thread.start()
+    # Step 1: the initial test email — starts a fresh thread.
+    step1_subject = f"[TEST 1/{seq_length}] {req.subject}"
+    step1_result = send_gmail_message(
+        access_token=token,
+        to=req.test_email,
+        subject=step1_subject,
+        body=req.body,
+    )
+    if not step1_result["ok"]:
+        raise HTTPException(status_code=502, detail=f"Failed to send test email: {step1_result['error']}")
+    sent_count += 1
+    logger.info("Test sequence: sent step 1/%d to %s", seq_length, req.test_email)
 
-    return {"status": "started", "total_steps": seq_length, "test_email": req.test_email}
+    anchor_message_id = step1_result["message_id_header"]
+    anchor_thread_id = step1_result["thread_id"]
+
+    # Steps 2..N: generate via AI and send as threaded replies, 10s apart.
+    for idx, email_type in enumerate(follow_ups):
+        step = idx + 2
+        _time.sleep(TEST_INTERVAL_SECONDS)
+
+        try:
+            draft = generate_outreach_email(
+                company_name=company[0],
+                company_industry=company[1] or "Unknown",
+                company_city=company[2] or "Utah",
+                contact_email=req.contact_email,
+                contact_name=req.contact_name,
+                contact_title=req.contact_title,
+                email_type=email_type,
+                company_id=req.company_id,
+                sender_name=sender_name,
+                days_since_last=0,
+            )
+            step_subject = f"[TEST {step}/{seq_length}] {draft['subject']}"
+            # Refresh the access token for each send — refreshes are cheap and
+            # tokens expire in 1 hour but we want robustness over efficiency here.
+            step_token = _get_access_token() or token
+            step_result = send_gmail_message(
+                access_token=step_token,
+                to=req.test_email,
+                subject=step_subject,
+                body=draft["body"],
+                reply_to_message_id=anchor_message_id,
+                reply_to_thread_id=anchor_thread_id,
+            )
+            if step_result["ok"]:
+                sent_count += 1
+                logger.info("Test sequence: sent step %d/%d to %s", step, seq_length, req.test_email)
+            else:
+                errors.append(f"step {step}: {step_result['error']}")
+        except Exception as e:
+            logger.exception("Test sequence step %d failed", step)
+            errors.append(f"step {step}: {e}")
+
+    return {
+        "status": "complete",
+        "sent": sent_count,
+        "total_steps": seq_length,
+        "test_email": req.test_email,
+        "errors": errors,
+    }
 
 
 # ── Gmail OAuth (refresh token) ───────────────────────────────────────────────
@@ -1080,6 +1483,387 @@ def run_follow_ups(request: Request):
     result = process_pending_followups()
     logger.info("Follow-up cron: %s", result)
     return result
+
+
+@app.post("/api/cron/scheduled-sends", dependencies=[])
+def run_scheduled_sends(request: Request):
+    """Cron endpoint: send due `scheduled_sends` rows with jittered pacing.
+
+    Runs every minute on Vercel Pro. Processes up to 10 rows per tick, sleeping
+    15–30s between each send for real Gmail-visible spacing. Uses row-level
+    claiming (status='processing' + tick_id in error_message) so overlapping
+    cron ticks don't double-send. Bails early if approaching maxDuration (300s),
+    releasing unprocessed rows back to 'pending' for the next tick.
+    """
+    # Same auth as follow-ups cron
+    vercel_cron = request.headers.get("x-vercel-cron")
+    cron_secret = os.environ.get("CRON_SECRET", "").strip()
+    auth_header = request.headers.get("Authorization", "")
+    provided = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else ""
+    if not (vercel_cron or (cron_secret and provided == cron_secret)):
+        logger.warning("Unauthorized scheduled-sends cron attempt")
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    from datetime import datetime, timezone
+    from email_generator import generate_outreach_email
+    from gmail_sender import send_gmail_message
+    import requests as http_requests
+    import random
+    import time as _time
+
+    # Budget: vercel maxDuration is 300s. Leave a safety margin of 30s for
+    # token refreshes, DB hiccups, and the final response flush.
+    MAX_RUNTIME_SECONDS = 270
+    JITTER_MIN = 15
+    JITTER_MAX = 30
+    PER_EMAIL_BUDGET = 27  # avg sleep (22.5) + gmail send (~2) + ai gen (~2-3)
+    # Cap: how many rows to consider in one tick. At ~27s each, 10 fits in 270s.
+    BATCH_LIMIT = 10
+
+    tick_start = _time.monotonic()
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # SERIALIZATION: if another tick is still running (has 'processing' rows),
+    # exit immediately. Otherwise all 15–30s jitter is nullified by overlapping
+    # ticks sending concurrently from the same Gmail account.
+    # Stuck-row safety: the tick_id we stamp into error_message encodes the
+    # claim time in ms. Reclaim rows whose claiming tick is >15min old —
+    # that tick definitely crashed (Vercel maxDuration is 300s).
+    stale_ms_cutoff = int((_time.time() - 15 * 60) * 1000)
+    stale_rs = execute(
+        "SELECT id, error_message FROM scheduled_sends WHERE status = 'processing'"
+    )
+    for sr in stale_rs.rows:
+        sid_stale, err_msg = sr
+        if err_msg and err_msg.startswith("tick-"):
+            try:
+                claim_ms = int(err_msg.split("-", 1)[1])
+                if claim_ms < stale_ms_cutoff:
+                    execute(
+                        "UPDATE scheduled_sends SET status = 'pending', error_message = NULL WHERE id = ?",
+                        [sid_stale],
+                    )
+            except (ValueError, IndexError):
+                pass
+
+    # Re-check after reaping
+    in_flight = execute(
+        "SELECT COUNT(*) FROM scheduled_sends WHERE status = 'processing'"
+    )
+    if in_flight.rows and in_flight.rows[0][0] > 0:
+        logger.info("scheduled-sends: another tick in flight, exiting")
+        return {"processed": 0, "sent": 0, "failed": 0, "skipped_concurrent": True}
+
+    # CLAIM rows atomically so this tick owns them.
+    tick_id = f"tick-{int(tick_start * 1000)}"
+    execute(
+        """UPDATE scheduled_sends
+           SET status = 'processing', error_message = ?
+           WHERE id IN (
+               SELECT id FROM scheduled_sends
+               WHERE status = 'pending' AND send_at <= ?
+               ORDER BY send_at ASC
+               LIMIT ?
+           )""",
+        [tick_id, now_iso, BATCH_LIMIT],
+    )
+
+    rs = execute(
+        """SELECT id, user_email, test_email, company_id, contact_email,
+                  contact_name, contact_title, email_type, step_num, total_steps,
+                  reply_to_message_id, reply_to_thread_id, kind, subject, body
+           FROM scheduled_sends
+           WHERE status = 'processing' AND error_message = ?
+           ORDER BY send_at ASC""",
+        [tick_id],
+    )
+
+    if not rs.rows:
+        return {"processed": 0, "sent": 0, "failed": 0}
+
+    # Cache refreshed access tokens per user_email so we don't refresh 5 times
+    tokens: dict[str, str | None] = {}
+
+    def _token_for(user_email: str) -> str | None:
+        if user_email in tokens:
+            return tokens[user_email]
+        tr = execute("SELECT refresh_token FROM gmail_tokens WHERE user_email = ?", [user_email])
+        if not tr.rows:
+            tokens[user_email] = None
+            return None
+        try:
+            refresh_token = enc_decrypt(tr.rows[0][0])
+        except Exception as e:
+            logger.error("Failed to decrypt refresh token for %s: %s", user_email, e)
+            tokens[user_email] = None
+            return None
+        client_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+        client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
+        resp = http_requests.post("https://oauth2.googleapis.com/token", data={
+            "client_id": client_id, "client_secret": client_secret,
+            "refresh_token": refresh_token, "grant_type": "refresh_token",
+        }, timeout=10)
+        access = resp.json().get("access_token") if resp.status_code == 200 else None
+        tokens[user_email] = access
+        return access
+
+    sent = 0
+    failed = 0
+    skipped_for_time = 0
+    for idx, r in enumerate(rs.rows):
+        # Bail if we're close to the maxDuration — release this row back to
+        # 'pending' so the next cron tick (1 minute later) picks it up.
+        elapsed = _time.monotonic() - tick_start
+        if elapsed + PER_EMAIL_BUDGET > MAX_RUNTIME_SECONDS:
+            # Release this and any remaining claimed-but-unprocessed rows
+            remaining_ids = [row[0] for row in rs.rows[idx:]]
+            if remaining_ids:
+                placeholders = ",".join("?" for _ in remaining_ids)
+                execute(
+                    f"UPDATE scheduled_sends SET status = 'pending', error_message = NULL WHERE id IN ({placeholders})",
+                    remaining_ids,
+                )
+                skipped_for_time = len(remaining_ids)
+            break
+
+        # Sleep BEFORE sending (not before the first) to space out Gmail sends
+        if idx > 0:
+            _time.sleep(random.randint(JITTER_MIN, JITTER_MAX))
+
+        (sid, user_email, test_email, company_id, contact_email,
+         contact_name, contact_title, email_type, step_num, total_steps,
+         reply_to_message_id, reply_to_thread_id, kind, stored_subject, stored_body) = r
+
+        try:
+            token = _token_for(user_email)
+            if not token:
+                execute(
+                    "UPDATE scheduled_sends SET status = 'failed', error_message = ?, sent_at = ? WHERE id = ?",
+                    ["no gmail token", now_iso, sid],
+                )
+                failed += 1
+                continue
+
+            kind = kind or "test"
+
+            if kind == "followup":
+                # Generate the follow-up fresh, thread into the existing conversation,
+                # log to sent_emails, and schedule the next step (if any).
+                from email_generator import generate_outreach_email
+                from gmail_sender import get_thread_anchor
+                from followup_engine import (
+                    get_sequence, get_follow_up_days, STEP_TO_EMAIL_TYPE,
+                )
+                from datetime import timedelta
+
+                co_rs = execute("SELECT name, industry, city FROM companies WHERE id = ?", [company_id])
+                if not co_rs.rows:
+                    execute(
+                        "UPDATE scheduled_sends SET status = 'failed', error_message = ?, sent_at = ? WHERE id = ?",
+                        ["company not found", now_iso, sid],
+                    )
+                    failed += 1
+                    continue
+                co = co_rs.rows[0]
+
+                profile_rs = execute("SELECT full_name FROM user_profiles WHERE email = ?", [user_email])
+                sender_name = profile_rs.rows[0][0] if profile_rs.rows else user_email
+
+                # Map follow_up_1/2/3 step name → AI email_type (follow_up/follow_up_2/etc.)
+                ai_email_type = STEP_TO_EMAIL_TYPE.get(email_type, "follow_up")
+
+                try:
+                    draft = generate_outreach_email(
+                        company_name=co[0],
+                        company_industry=co[1] or "Unknown",
+                        company_city=co[2] or "Utah",
+                        contact_email=contact_email,
+                        contact_name=None,
+                        contact_title=None,
+                        email_type=ai_email_type,
+                        company_id=company_id,
+                        sender_name=sender_name,
+                        days_since_last=get_follow_up_days(),
+                    )
+                except Exception as e:
+                    execute(
+                        "UPDATE scheduled_sends SET status = 'failed', error_message = ?, sent_at = ? WHERE id = ?",
+                        [f"generate: {e}"[:500], now_iso, sid],
+                    )
+                    failed += 1
+                    continue
+
+                anchor = get_thread_anchor(company_id, contact_email)
+                subject_to_send = (anchor["root_subject"] if anchor and anchor.get("root_subject")
+                                   else draft["subject"])
+
+                from gmail_sender import send_gmail_message as _send
+                result = _send(
+                    access_token=token,
+                    to=contact_email,
+                    subject=subject_to_send,
+                    body=draft["body"],
+                    reply_to_message_id=anchor["message_id_header"] if anchor else None,
+                    reply_to_thread_id=anchor["thread_id"] if anchor else None,
+                )
+
+                if not result["ok"]:
+                    execute(
+                        "UPDATE scheduled_sends SET status = 'failed', error_message = ?, sent_at = ? WHERE id = ?",
+                        [result["error"][:500], now_iso, sid],
+                    )
+                    failed += 1
+                    continue
+
+                # Schedule the next follow-up if this wasn't the final step
+                sequence = get_sequence()
+                next_follow_up = None
+                if email_type != "final":
+                    current_idx = sequence.index(email_type) if email_type in sequence else 0
+                    if current_idx + 1 < len(sequence):
+                        next_follow_up = (datetime.now(timezone.utc)
+                                          + timedelta(days=get_follow_up_days())).isoformat()
+
+                stored_subject = (f"Re: {anchor['root_subject']}"
+                                  if anchor and anchor.get("root_subject")
+                                  else draft["subject"])
+
+                execute(
+                    """INSERT INTO sent_emails
+                       (company_id, to_email, subject, body, sent_by, email_type, gmail_message_id,
+                        thread_id, message_id_header, next_follow_up_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    [company_id, contact_email, stored_subject, draft["body"],
+                     user_email, email_type, result["gmail_message_id"],
+                     result["thread_id"], result["message_id_header"],
+                     next_follow_up],
+                )
+                execute(
+                    "UPDATE scheduled_sends SET status = 'sent', sent_at = ? WHERE id = ?",
+                    [now_iso, sid],
+                )
+                sent += 1
+                logger.info("Follow-up sent: type=%s to %s (sid=%d)", email_type, contact_email, sid)
+                continue
+
+            if kind == "production":
+                # Pre-baked subject/body from the bulk composer. No AI call.
+                recipient = contact_email
+                subject_to_send = stored_subject or ""
+                body_to_send = stored_body or ""
+
+                result = send_gmail_message(
+                    access_token=token,
+                    to=recipient,
+                    subject=subject_to_send,
+                    body=body_to_send,
+                )
+
+                if result["ok"]:
+                    # Log to sent_emails for follow-up tracking (initial email)
+                    from followup_engine import get_follow_up_days
+                    from datetime import timedelta
+                    follow_up_days = get_follow_up_days()
+                    next_follow_up = (datetime.now(timezone.utc) + timedelta(days=follow_up_days)).isoformat()
+                    execute(
+                        """INSERT INTO sent_emails
+                           (company_id, to_email, subject, body, sent_by, email_type, gmail_message_id,
+                            thread_id, message_id_header, next_follow_up_at)
+                           VALUES (?, ?, ?, ?, ?, 'initial', ?, ?, ?, ?)""",
+                        [company_id, recipient, subject_to_send, body_to_send,
+                         user_email, result["gmail_message_id"],
+                         result["thread_id"], result["message_id_header"],
+                         next_follow_up],
+                    )
+                    # Clear any lingering draft
+                    execute(
+                        "DELETE FROM email_drafts WHERE company_id = ? AND contact_email = ?",
+                        [company_id, recipient],
+                    )
+                    execute(
+                        "UPDATE scheduled_sends SET status = 'sent', sent_at = ? WHERE id = ?",
+                        [now_iso, sid],
+                    )
+                    sent += 1
+                    logger.info("Bulk production send: to %s (id=%d)", recipient, sid)
+                else:
+                    execute(
+                        "UPDATE scheduled_sends SET status = 'failed', error_message = ?, sent_at = ? WHERE id = ?",
+                        [result["error"][:500], now_iso, sid],
+                    )
+                    failed += 1
+                continue
+
+            # kind == "test" path: generate fresh via AI
+            co_rs = execute("SELECT name, industry, city FROM companies WHERE id = ?", [company_id])
+            if not co_rs.rows:
+                execute(
+                    "UPDATE scheduled_sends SET status = 'failed', error_message = ?, sent_at = ? WHERE id = ?",
+                    ["company not found", now_iso, sid],
+                )
+                failed += 1
+                continue
+            co = co_rs.rows[0]
+
+            profile_rs = execute("SELECT full_name FROM user_profiles WHERE email = ?", [user_email])
+            sender_name = profile_rs.rows[0][0] if profile_rs.rows else user_email
+
+            draft = generate_outreach_email(
+                company_name=co[0],
+                company_industry=co[1] or "Unknown",
+                company_city=co[2] or "Utah",
+                contact_email=contact_email,
+                contact_name=contact_name,
+                contact_title=contact_title,
+                email_type=email_type,
+                company_id=company_id,
+                sender_name=sender_name,
+                days_since_last=0,
+            )
+
+            subject = f"[TEST {step_num}/{total_steps}] {draft['subject']}"
+
+            result = send_gmail_message(
+                access_token=token,
+                to=test_email,
+                subject=subject,
+                body=draft["body"],
+                reply_to_message_id=reply_to_message_id,
+                reply_to_thread_id=reply_to_thread_id,
+            )
+
+            if result["ok"]:
+                execute(
+                    "UPDATE scheduled_sends SET status = 'sent', sent_at = ? WHERE id = ?",
+                    [now_iso, sid],
+                )
+                sent += 1
+                logger.info("Scheduled test send: step %d/%d to %s (id=%d, threaded=%s)",
+                            step_num, total_steps, test_email, sid, bool(reply_to_thread_id))
+            else:
+                execute(
+                    "UPDATE scheduled_sends SET status = 'failed', error_message = ?, sent_at = ? WHERE id = ?",
+                    [result["error"][:500], now_iso, sid],
+                )
+                failed += 1
+        except Exception as e:
+            logger.exception("Scheduled send id=%s failed", sid)
+            try:
+                execute(
+                    "UPDATE scheduled_sends SET status = 'failed', error_message = ?, sent_at = ? WHERE id = ?",
+                    [str(e)[:500], now_iso, sid],
+                )
+            except Exception:
+                pass
+            failed += 1
+
+    return {
+        "processed": len(rs.rows),
+        "sent": sent,
+        "failed": failed,
+        "released_for_next_tick": skipped_for_time,
+        "elapsed_seconds": round(_time.monotonic() - tick_start, 1),
+    }
 
 
 if __name__ == "__main__":

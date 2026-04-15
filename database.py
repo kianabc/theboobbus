@@ -26,6 +26,29 @@ def batch(statements):
         client.close()
 
 
+def _run_migrations(client):
+    """Idempotent column additions for existing installs.
+
+    SQLite doesn't support ALTER TABLE ... ADD COLUMN IF NOT EXISTS, so we
+    attempt each ALTER and ignore the duplicate-column error.
+    """
+    migrations = [
+        "ALTER TABLE sent_emails ADD COLUMN message_id_header TEXT",
+        "ALTER TABLE sent_emails ADD COLUMN thread_id TEXT",
+        "ALTER TABLE scheduled_sends ADD COLUMN reply_to_message_id TEXT",
+        "ALTER TABLE scheduled_sends ADD COLUMN reply_to_thread_id TEXT",
+        "ALTER TABLE scheduled_sends ADD COLUMN kind TEXT DEFAULT 'test'",
+        "ALTER TABLE scheduled_sends ADD COLUMN subject TEXT",
+        "ALTER TABLE scheduled_sends ADD COLUMN body TEXT",
+    ]
+    for sql in migrations:
+        try:
+            client.execute(sql)
+        except Exception:
+            # Column already exists
+            pass
+
+
 def init_db():
     client = _get_client()
     try:
@@ -94,6 +117,26 @@ def init_db():
                 refresh_token TEXT NOT NULL,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS scheduled_sends (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_email TEXT NOT NULL,
+                test_email TEXT NOT NULL,
+                company_id INTEGER NOT NULL,
+                contact_email TEXT NOT NULL,
+                contact_name TEXT,
+                contact_title TEXT,
+                email_type TEXT NOT NULL,
+                step_num INTEGER NOT NULL,
+                total_steps INTEGER NOT NULL,
+                send_at TIMESTAMP NOT NULL,
+                status TEXT DEFAULT 'pending',
+                error_message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                sent_at TIMESTAMP
+            )""",
+            """CREATE INDEX IF NOT EXISTS idx_scheduled_sends_due
+               ON scheduled_sends(status, send_at)""",
         ])
+        _run_migrations(client)
     finally:
         client.close()
