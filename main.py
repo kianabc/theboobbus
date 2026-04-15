@@ -1063,6 +1063,39 @@ def _get_setting(key: str, default: str = "") -> str:
     return rs.rows[0][0] if rs.rows else default
 
 
+# Gmail proxies images and pre-fetches them when an email lands in any inbox,
+# producing an "open" within seconds of send. That's not a real human view —
+# filter out opens within 60s of send to remove this baseline noise.
+_PREFETCH_WINDOW_SECONDS = 60
+
+
+def _filter_proxy_prefetch_opens(sent_iso: str | None, opens: list[str]) -> list[str]:
+    """Drop opens that fired within PREFETCH_WINDOW seconds of send_at."""
+    if not sent_iso or not opens:
+        return opens
+    from datetime import datetime as _dt, timedelta as _td
+
+    def _parse(s: str):
+        s = s.replace(" ", "T")
+        if not (s.endswith("Z") or "+" in s[10:] or "-" in s[10:]):
+            s += "+00:00"
+        return _dt.fromisoformat(s.replace("Z", "+00:00"))
+
+    try:
+        sent_dt = _parse(sent_iso)
+    except Exception:
+        return opens
+    cutoff = sent_dt + _td(seconds=_PREFETCH_WINDOW_SECONDS)
+    kept = []
+    for o in opens:
+        try:
+            if _parse(o) > cutoff:
+                kept.append(o)
+        except Exception:
+            kept.append(o)
+    return kept
+
+
 
 
 def _set_setting(key: str, value: str):
@@ -1550,8 +1583,19 @@ def gmail_authorize(body: GmailAuthRequest, request: Request):
         [user_email, enc_encrypt(refresh_token)],
     )
 
+    # Auto-promote the FIRST connected Gmail to be the org send account so that
+    # one user (typically the boss) connecting Gmail is enough — no separate
+    # "and now go pick it in Settings" step. We only set if unset, so a later
+    # connection by a different user doesn't override the boss's choice.
+    auto_promoted = False
+    current_org = _get_setting("org_gmail_account", "").strip()
+    if not current_org and user_email != "unknown":
+        _set_setting("org_gmail_account", user_email)
+        auto_promoted = True
+        logger.info("Auto-promoted %s to org_gmail_account (was unset)", user_email)
+
     logger.info("Stored encrypted Gmail refresh token for %s", user_email)
-    return {"status": "authorized", "email": user_email}
+    return {"status": "authorized", "email": user_email, "auto_promoted_to_org": auto_promoted}
 
 
 @app.get("/api/gmail/status")
@@ -1580,7 +1624,7 @@ import uuid
 
 
 @app.get("/api/track/{tracking_id}")
-def track_email_open(tracking_id: str):
+def track_email_open(tracking_id: str, request: Request):
     """Tracking pixel endpoint. Logs when an email is opened."""
     # Rate limit: max 10 opens per tracking ID per hour
     if not check_rate_limit(f"track:{tracking_id}", 10, 3600):
@@ -1594,10 +1638,14 @@ def track_email_open(tracking_id: str):
                 "UPDATE email_opens SET opened_at = COALESCE(opened_at, CURRENT_TIMESTAMP), open_count = open_count + 1 WHERE tracking_id = ?",
                 [tracking_id],
             )
-            # Log this individual open event for per-open timeline in the UI
+            # Log this individual open event with metadata for filtering
+            ua = (request.headers.get("user-agent") or "")[:300]
+            ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (
+                request.client.host if request.client else ""
+            )
             execute(
-                "INSERT INTO email_open_events (sent_email_id) VALUES (?)",
-                [sent_email_id],
+                "INSERT INTO email_open_events (sent_email_id, user_agent, ip) VALUES (?, ?, ?)",
+                [sent_email_id, ua, ip[:64]],
             )
 
     # Return a 1x1 transparent GIF

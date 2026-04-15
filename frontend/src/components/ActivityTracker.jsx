@@ -117,7 +117,9 @@ export default function ActivityTracker({ onBack, onSelectCompany }) {
             </span>
             <span className="legend-item">
               <span className="badge badge-viewed">👁 Viewed</span>
-              opened the email at least once (image-pixel — not 100% reliable on mobile)
+              opened — every open event listed in the timeline below. Note: an open within ~30s of
+              send is usually Gmail's image proxy auto-fetching, not a human view. We can't
+              reliably tell sender opens (your own Sent folder) from recipient opens
             </span>
             <span className="legend-item">
               <span className="badge badge-pending">Waiting</span>
@@ -174,11 +176,8 @@ export default function ActivityTracker({ onBack, onSelectCompany }) {
                       {c.replied ? (
                         <span className="badge badge-replied">Replied</span>
                       ) : c.opened ? (
-                        <span
-                          className="badge badge-viewed"
-                          title={`Opened ${c.total_opens} time${c.total_opens === 1 ? "" : "s"}`}
-                        >
-                          👁 Viewed{c.total_opens > 1 ? ` ×${c.total_opens}` : ""}
+                        <span className="badge badge-viewed" title="See timeline below for individual open events">
+                          👁 Viewed
                         </span>
                       ) : c.next_follow_up ? (
                         <span className="badge badge-pending">Waiting</span>

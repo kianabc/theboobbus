@@ -76,7 +76,7 @@ export default function BulkComposer({ companyId, contacts, onClose, onSent }) {
           <div className="bulk-prep">
             <p className="bulk-desc">
               Each contact gets an independently generated draft. You'll review and edit each one
-              before sending. Sends are jittered 30–120s apart to avoid spam flags.
+              before sending. Sends are jittered 15–30s apart to avoid spam flags.
             </p>
             <div className="bulk-contact-preview">
               <strong>Recipients:</strong>

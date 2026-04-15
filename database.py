@@ -26,6 +26,25 @@ def batch(statements):
         client.close()
 
 
+def _backfill_open_events(client):
+    """For emails that have legacy email_opens.opened_at but no per-event rows,
+    insert one synthetic row so the per-event timeline isn't empty for older
+    emails. Idempotent: only inserts when the email has zero events."""
+    try:
+        client.execute(
+            """INSERT INTO email_open_events (sent_email_id, opened_at)
+               SELECT eo.sent_email_id, eo.opened_at
+               FROM email_opens eo
+               WHERE eo.opened_at IS NOT NULL
+                 AND NOT EXISTS (
+                   SELECT 1 FROM email_open_events ev
+                   WHERE ev.sent_email_id = eo.sent_email_id
+                 )"""
+        )
+    except Exception:
+        pass
+
+
 def _run_migrations(client):
     """Idempotent column additions for existing installs.
 
@@ -41,6 +60,8 @@ def _run_migrations(client):
         "ALTER TABLE scheduled_sends ADD COLUMN subject TEXT",
         "ALTER TABLE scheduled_sends ADD COLUMN body TEXT",
         "ALTER TABLE sent_emails ADD COLUMN is_test INTEGER DEFAULT 0",
+        "ALTER TABLE email_open_events ADD COLUMN user_agent TEXT",
+        "ALTER TABLE email_open_events ADD COLUMN ip TEXT",
     ]
     for sql in migrations:
         try:
@@ -147,5 +168,6 @@ def init_db():
                ON email_open_events(sent_email_id)""",
         ])
         _run_migrations(client)
+        _backfill_open_events(client)
     finally:
         client.close()

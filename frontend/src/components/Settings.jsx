@@ -250,9 +250,9 @@ export default function Settings({ onBack }) {
         <h2>Organization Send Account</h2>
         <p className="settings-desc">
           All outreach — initial emails, test sequences, and auto follow-ups — goes out through the
-          Gmail account selected here, regardless of which teammate is logged in. Set this once and
-          every user's sends land in the same Sent folder. Leave blank to fall back to each user's
-          own connected Gmail.
+          Gmail account selected here, regardless of which teammate is logged in. The first Gmail
+          connected to the app is auto-set as the org account. Change here if the boss wants
+          a different inbox to receive replies. Leave blank to fall back to each user's own Gmail.
         </p>
 
         <div className="settings-field">
@@ -330,7 +330,19 @@ export default function Settings({ onBack }) {
                   try {
                     const result = await gmailAuthorize(response.code, redirectUri);
                     setGmail({ authorized: true, email: result.email, updated_at: new Date().toISOString() });
-                    setStatus({ type: "success", text: "Gmail connected! Auto follow-ups are now active." });
+                    if (result.auto_promoted_to_org) {
+                      // Refresh both the settings (to show the dropdown's new value) and the
+                      // candidate list (to include this account).
+                      const [s, opts] = await Promise.all([fetchSettings(), fetchOrgGmailOptions()]);
+                      setSettings(s);
+                      setOrgGmailOptions(Array.isArray(opts) ? opts : []);
+                      setStatus({
+                        type: "success",
+                        text: `Gmail connected! ${result.email} is now the organization send account — all teammates' emails go through it.`,
+                      });
+                    } else {
+                      setStatus({ type: "success", text: "Gmail connected! Auto follow-ups are now active." });
+                    }
                   } catch (e) {
                     setStatus({ type: "error", text: "Failed to connect Gmail: " + e.message });
                   } finally {

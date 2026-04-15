@@ -267,11 +267,28 @@ CUSTOMER FEEDBACK & TESTIMONIALS (you may reference these, but do NOT fabricate 
 {feedback}
 """
 
+    # The sender_name is what will appear in the signature. Tell Claude to
+    # write the body as this person so first-person references match the
+    # signature. Without this, Claude tends to self-introduce as "Rena"
+    # (pulled from BOOB_BUS_CONTEXT's founder mention) regardless of who's
+    # actually signing, which produces mismatched emails.
+    sender_first = (sender_name or "").split()[0] if sender_name else ""
+    sender_clause = (
+        f"You are writing AS {sender_name}. Refer to yourself in the first person as {sender_first}. "
+        f"Do NOT introduce yourself as Rena, Mike, or anyone else mentioned in the context. "
+        f"The signature '{sender_name}' is appended automatically, so what you write must match."
+    ) if sender_name else (
+        "Do NOT self-introduce with a specific person's name (e.g. 'I'm Rena'). "
+        "Use 'we' and 'our team' instead. A signature is appended automatically."
+    )
+
     model_id = _get_db_setting("email_model") or "claude-opus-4-6"
     message = client.messages.create(
         model=model_id,
         max_tokens=500,
         system=f"""You are writing outreach emails on behalf of The Boob Bus, a mobile mammography service in Utah.
+
+{sender_clause}
 
 {context}
 {feedback_section}
