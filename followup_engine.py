@@ -74,34 +74,16 @@ def get_sequence() -> list[str]:
 
 
 def _refresh_gmail_token(user_email: str) -> str | None:
-    """Get a fresh Gmail access token using stored refresh token."""
-    from encryption import decrypt as enc_decrypt
+    """Get a fresh Gmail access token for the org send account.
 
-    rs = execute("SELECT refresh_token FROM gmail_tokens WHERE user_email = ?", [user_email])
-    if not rs.rows:
-        logger.warning("No refresh token for %s", user_email)
-        return None
-
-    refresh_token = enc_decrypt(rs.rows[0][0])
-    client_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
-    client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
-
-    if not client_id or not client_secret:
-        logger.error("GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not set")
-        return None
-
-    resp = http_requests.post("https://oauth2.googleapis.com/token", data={
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "refresh_token": refresh_token,
-        "grant_type": "refresh_token",
-    }, timeout=10)
-
-    if resp.status_code != 200:
-        logger.error("Token refresh failed: %s", resp.text)
-        return None
-
-    return resp.json().get("access_token")
+    `user_email` is kept for API compatibility but ignored when an org account
+    is configured — in that case all sends route through the org Gmail, not
+    the original sender's. This is what lets Rena configure one Gmail and have
+    employees' emails go out through it.
+    """
+    from org_sender import get_org_access_token
+    tok, _ = get_org_access_token(user_email)
+    return tok
 
 
 def _check_for_reply(gmail_token: str, message_id: str) -> bool:

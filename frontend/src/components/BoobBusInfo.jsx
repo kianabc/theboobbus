@@ -122,7 +122,7 @@ export default function BoobBusInfo({ onBack }) {
 
       {/* ── Boob Bus Context ── */}
       <div className="info-card">
-        <h2>Boob Bus Information</h2>
+        <h2>Boob Bus Information (AI Context)</h2>
         <p className="info-desc">
           This is the context that Claude AI uses when writing all emails.
           It includes facts about The Boob Bus, services, pricing, and benefits.

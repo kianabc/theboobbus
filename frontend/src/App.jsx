@@ -144,7 +144,7 @@ function App() {
               className={`btn btn-nav ${view === "boobbus-info" ? "active" : ""}`}
               onClick={() => navigate("boobbus-info")}
             >
-              Boob Bus Info
+              AI Instructions
             </button>
             <button
               className={`btn btn-nav ${view === "settings" ? "active" : ""}`}

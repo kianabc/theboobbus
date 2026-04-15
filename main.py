@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from auth import get_current_user
 from database import init_db, execute
+from org_sender import get_org_sender, get_org_access_token as _org_access_token
 from encryption import encrypt as enc_encrypt, decrypt as enc_decrypt
 from rate_limit import check_rate_limit
 from seed_data import seed_companies
@@ -594,12 +595,9 @@ def generate_email(body: GenerateEmailRequest, request: Request):
     if not rs.rows:
         raise HTTPException(status_code=404, detail="Company not found")
 
-    # Get sender name from user profile
+    # Sender identity comes from the org account (or logged-in user if unset)
     user = get_current_user(request)
-    sender_name = user.get("name", "")
-    profile_rs = execute("SELECT full_name FROM user_profiles WHERE email = ?", [user["email"]])
-    if profile_rs.rows and profile_rs.rows[0][0]:
-        sender_name = profile_rs.rows[0][0]
+    sender_name = get_org_sender(user["email"])["sender_name"] or user.get("name", "")
 
     # Calculate days since last email to this contact
     days_since_last = None
@@ -681,8 +679,7 @@ def bulk_generate_emails(body: BulkGenerateRequest, request: Request):
         raise HTTPException(status_code=404, detail="Company not found")
     co = co_rs.rows[0]
 
-    profile_rs = execute("SELECT full_name FROM user_profiles WHERE email = ?", [user["email"]])
-    sender_name = profile_rs.rows[0][0] if profile_rs.rows else user.get("name", "")
+    sender_name = get_org_sender(user["email"])["sender_name"] or user.get("name", "")
 
     def gen_one(contact: BulkContact) -> BulkDraft | None:
         try:
@@ -766,21 +763,14 @@ def bulk_send(body: BulkSendRequest, request: Request):
                 detail="Rate limit would be exceeded. Max 10 emails per hour per user.",
             )
 
-    # Get the user's Gmail access token (same pattern as /api/send-email)
-    rs = execute("SELECT refresh_token FROM gmail_tokens WHERE user_email = ?", [user["email"]])
-    if not rs.rows:
-        raise HTTPException(status_code=400, detail="Gmail not connected. Go to Settings.")
-
-    refresh_token = enc_decrypt(rs.rows[0][0])
-    client_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
-    client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
-    tok_resp = http_requests.post("https://oauth2.googleapis.com/token", data={
-        "client_id": client_id, "client_secret": client_secret,
-        "refresh_token": refresh_token, "grant_type": "refresh_token",
-    }, timeout=10)
-    if tok_resp.status_code != 200:
-        raise HTTPException(status_code=502, detail="Failed to refresh Gmail token. Reconnect Gmail in Settings.")
-    access_token = tok_resp.json().get("access_token")
+    # Route through the org Gmail account (falls back to the logged-in user
+    # if no org account is configured).
+    access_token, send_as_email = _org_access_token(user["email"])
+    if not access_token:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Gmail not connected for the send account ({send_as_email or 'unset'}). Check Settings.",
+        )
 
     # Send the FIRST email synchronously
     first = body.emails[0]
@@ -875,19 +865,9 @@ def send_email(body: SendEmailRequest, request: Request):
 
     # Try to use stored refresh token first
     if not gmail_token:
+        # Route through the org account (falls back to logged-in user if unset).
         user = get_current_user(request)
-        rs = execute("SELECT refresh_token FROM gmail_tokens WHERE user_email = ?", [user["email"]])
-        if rs.rows:
-            client_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
-            client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
-            resp = http_requests.post("https://oauth2.googleapis.com/token", data={
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "refresh_token": enc_decrypt(rs.rows[0][0]),
-                "grant_type": "refresh_token",
-            }, timeout=10)
-            if resp.status_code == 200:
-                gmail_token = resp.json().get("access_token", "")
+        gmail_token, _org_email = _org_access_token(user["email"])
 
     if not gmail_token:
         raise HTTPException(status_code=400, detail="Gmail not connected. Go to Settings to connect your Gmail account.")
@@ -1007,6 +987,7 @@ class SettingsUpdate(BaseModel):
     anthropic_api_key: str | None = None
     email_signature: str | None = None
     email_model: str | None = None
+    org_gmail_account: str | None = None
 
 
 def _mask_key(key: str) -> str:
@@ -1019,6 +1000,8 @@ def _mask_key(key: str) -> str:
 def _get_setting(key: str, default: str = "") -> str:
     rs = execute("SELECT value FROM settings WHERE key = ?", [key])
     return rs.rows[0][0] if rs.rows else default
+
+
 
 
 def _set_setting(key: str, value: str):
@@ -1047,7 +1030,20 @@ def get_settings():
         "anthropic_api_key_set": bool(_get_setting("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY", "")),
         "email_signature": _get_setting("email_signature", "{sender_name}\nThe Boob Bus\nhttps://theboobbus.com\n(866) 747-BOOB"),
         "email_model": _get_setting("email_model", "claude-opus-4-6"),
+        "org_gmail_account": _get_setting("org_gmail_account", ""),
     }
+
+
+@app.get("/api/org-gmail/options")
+def list_org_gmail_options():
+    """List all connected Gmail accounts — candidates for the org send account."""
+    rs = execute("""
+        SELECT gt.user_email, up.full_name
+        FROM gmail_tokens gt
+        LEFT JOIN user_profiles up ON up.email = gt.user_email
+        ORDER BY gt.user_email
+    """)
+    return [{"email": r[0], "full_name": r[1] or r[0]} for r in rs.rows]
 
 
 # Catalog of selectable models for email generation (exposed to the UI).
@@ -1118,6 +1114,18 @@ def update_settings(body: SettingsUpdate):
             raise HTTPException(status_code=400, detail=f"Unknown email_model. Must be one of: {sorted(valid_ids)}")
         _set_setting("email_model", body.email_model)
         logger.info("AUDIT: email model changed to %s", body.email_model)
+    if body.org_gmail_account is not None:
+        requested = body.org_gmail_account.strip()
+        if requested:
+            # Must be one of the connected Gmail accounts
+            tok_rs = execute("SELECT 1 FROM gmail_tokens WHERE user_email = ?", [requested])
+            if not tok_rs.rows:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{requested} has no connected Gmail token. That user must sign in and connect Gmail first.",
+                )
+        _set_setting("org_gmail_account", requested)
+        logger.info("AUDIT: org Gmail account set to %s", requested or "<unset>")
     return get_settings()
 
 
@@ -1234,12 +1242,6 @@ def start_test_sequence(req: TestSequenceRequest, request: Request):
 
     user = get_current_user(request)
 
-    # Get Gmail token from stored refresh token
-    rs = execute("SELECT refresh_token FROM gmail_tokens WHERE user_email = ?", [user["email"]])
-    if not rs.rows:
-        raise HTTPException(status_code=400, detail="Gmail not connected. Go to Settings first.")
-
-    refresh_token = enc_decrypt(rs.rows[0][0])
     seq_length = get_sequence_length()
 
     # Build sequence types
@@ -1257,27 +1259,22 @@ def start_test_sequence(req: TestSequenceRequest, request: Request):
         raise HTTPException(status_code=404, detail="Company not found")
     company = company_rs.rows[0]
 
-    def _get_access_token():
-        import requests as http_requests
-        client_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
-        client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
-        resp = http_requests.post("https://oauth2.googleapis.com/token", data={
-            "client_id": client_id, "client_secret": client_secret,
-            "refresh_token": refresh_token, "grant_type": "refresh_token",
-        }, timeout=10)
-        if resp.status_code == 200:
-            return resp.json().get("access_token")
-        return None
-
     # Hardcoded: test-sequence emails are 20 seconds apart. Synchronous in the
     # request so spacing is real. Worst case with 5 emails: 4 gaps × 20s + 5
     # sends × ~2s ≈ 90s, comfortably under the 300s maxDuration.
     TEST_INTERVAL_SECONDS = 20
     import time as _time
 
-    # Get sender name
-    profile_rs = execute("SELECT full_name FROM user_profiles WHERE email = ?", [user["email"]])
-    sender_name = profile_rs.rows[0][0] if profile_rs.rows else user.get("name", "")
+    # Org sender identity: Gmail token + sender name come from the org account
+    # if configured, else the logged-in user's.
+    sender_ctx = get_org_sender(user["email"])
+    if not sender_ctx["refresh_token"]:
+        raise HTTPException(status_code=400, detail="Gmail not connected for the send account. Check Settings.")
+    sender_name = sender_ctx["sender_name"] or user.get("name", "")
+
+    def _get_access_token():
+        tok, _ = _org_access_token(user["email"])
+        return tok
 
     from gmail_sender import send_gmail_message
     sent_count = 0
@@ -1581,31 +1578,17 @@ def run_scheduled_sends(request: Request):
     if not rs.rows:
         return {"processed": 0, "sent": 0, "failed": 0}
 
-    # Cache refreshed access tokens per user_email so we don't refresh 5 times
-    tokens: dict[str, str | None] = {}
+    # All sends route through the org account. Cache the token across the tick.
+    _cached_token: dict[str, str | None] = {}
 
     def _token_for(user_email: str) -> str | None:
-        if user_email in tokens:
-            return tokens[user_email]
-        tr = execute("SELECT refresh_token FROM gmail_tokens WHERE user_email = ?", [user_email])
-        if not tr.rows:
-            tokens[user_email] = None
-            return None
-        try:
-            refresh_token = enc_decrypt(tr.rows[0][0])
-        except Exception as e:
-            logger.error("Failed to decrypt refresh token for %s: %s", user_email, e)
-            tokens[user_email] = None
-            return None
-        client_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
-        client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
-        resp = http_requests.post("https://oauth2.googleapis.com/token", data={
-            "client_id": client_id, "client_secret": client_secret,
-            "refresh_token": refresh_token, "grant_type": "refresh_token",
-        }, timeout=10)
-        access = resp.json().get("access_token") if resp.status_code == 200 else None
-        tokens[user_email] = access
-        return access
+        # user_email is passed for API compatibility/fallback, but the actual
+        # sender is determined by get_org_sender (org setting takes priority).
+        if "token" in _cached_token:
+            return _cached_token["token"]
+        tok, _ = _org_access_token(user_email)
+        _cached_token["token"] = tok
+        return tok
 
     sent = 0
     failed = 0
@@ -1666,8 +1649,7 @@ def run_scheduled_sends(request: Request):
                     continue
                 co = co_rs.rows[0]
 
-                profile_rs = execute("SELECT full_name FROM user_profiles WHERE email = ?", [user_email])
-                sender_name = profile_rs.rows[0][0] if profile_rs.rows else user_email
+                sender_name = get_org_sender(user_email)["sender_name"] or user_email
 
                 # Map follow_up_1/2/3 step name → AI email_type (follow_up/follow_up_2/etc.)
                 ai_email_type = STEP_TO_EMAIL_TYPE.get(email_type, "follow_up")
@@ -1805,8 +1787,7 @@ def run_scheduled_sends(request: Request):
                 continue
             co = co_rs.rows[0]
 
-            profile_rs = execute("SELECT full_name FROM user_profiles WHERE email = ?", [user_email])
-            sender_name = profile_rs.rows[0][0] if profile_rs.rows else user_email
+            sender_name = get_org_sender(user_email)["sender_name"] or user_email
 
             draft = generate_outreach_email(
                 company_name=co[0],

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { fetchSettings, updateSettings, gmailAuthorize, gmailStatus, gmailDisconnect } from "../api";
+import { fetchSettings, updateSettings, gmailAuthorize, gmailStatus, gmailDisconnect, fetchOrgGmailOptions } from "../api";
 import "./Settings.css";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
@@ -18,10 +18,12 @@ export default function Settings({ onBack }) {
   const [gmail, setGmail] = useState(null);
   const [connectingGmail, setConnectingGmail] = useState(false);
   const [changedKeys, setChangedKeys] = useState({}); // Track which API keys user edited
+  const [orgGmailOptions, setOrgGmailOptions] = useState([]);
 
   useEffect(() => {
     fetchSettings().then(setSettings);
     gmailStatus().then(setGmail);
+    fetchOrgGmailOptions().then(setOrgGmailOptions);
   }, []);
 
   const update = (key, value) => setSettings((s) => ({ ...s, [key]: value }));
@@ -240,6 +242,38 @@ export default function Settings({ onBack }) {
           onChange={(e) => update("email_signature", e.target.value)}
           rows={5}
         />
+      </div>
+
+      {/* ── Organization Send Account ── */}
+      <div className="settings-card">
+        <h2>Organization Send Account</h2>
+        <p className="settings-desc">
+          All outreach — initial emails, test sequences, and auto follow-ups — goes out through the
+          Gmail account selected here, regardless of which teammate is logged in. Set this once and
+          every user's sends land in the same Sent folder. Leave blank to fall back to each user's
+          own connected Gmail.
+        </p>
+
+        <div className="settings-field">
+          <label>Send emails from</label>
+          <select
+            value={settings.org_gmail_account || ""}
+            onChange={(e) => update("org_gmail_account", e.target.value)}
+            className="settings-select"
+          >
+            <option value="">— Use each user's own Gmail —</option>
+            {orgGmailOptions.map((opt) => (
+              <option key={opt.email} value={opt.email}>
+                {opt.full_name} ({opt.email})
+              </option>
+            ))}
+          </select>
+          {orgGmailOptions.length === 0 && (
+            <span className="settings-hint">
+              No Gmail accounts connected yet. Connect one below first.
+            </span>
+          )}
+        </div>
       </div>
 
       {/* ── Gmail Connection for Auto Follow-ups ── */}

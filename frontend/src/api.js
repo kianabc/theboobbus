@@ -245,6 +245,11 @@ export async function fetchEmailModels() {
   return res.json();
 }
 
+export async function fetchOrgGmailOptions() {
+  const res = await authFetch(`${API}/api/org-gmail/options`);
+  return res.json();
+}
+
 export async function updateSettings(data) {
   const res = await authFetch(`${API}/api/settings`, {
     method: "PUT",
