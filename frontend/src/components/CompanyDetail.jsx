@@ -5,6 +5,7 @@ import {
 } from "../api";
 import EmailComposer from "./EmailComposer";
 import BulkComposer from "./BulkComposer";
+import { formatDate, formatDateTime } from "../utils/formatDate";
 import "./CompanyDetail.css";
 
 const BULK_MAX = 5;
@@ -475,17 +476,24 @@ export default function CompanyDetail({ companyId, onBack }) {
                   <td>
                     {o.replied ? (
                       <span className="badge badge-replied">Replied</span>
-                    ) : o.opened_at ? (
-                      <span className="badge badge-opened" title={`Opened ${o.open_count}x, last: ${new Date(o.opened_at).toLocaleString()}`}>
-                        Opened ({o.open_count}x)
-                      </span>
+                    ) : (o.opens && o.opens.length > 0) ? (
+                      <div className="opens-timeline">
+                        <span className="badge badge-opened">
+                          👁 Opened
+                        </span>
+                        <ul className="opens-list">
+                          {o.opens.map((ts, i) => (
+                            <li key={i}>{formatDateTime(ts)}</li>
+                          ))}
+                        </ul>
+                      </div>
                     ) : o.next_follow_up_at ? (
-                      <span className="badge badge-pending" title={`Follow-up on ${new Date(o.next_follow_up_at).toLocaleDateString()}`}>Waiting</span>
+                      <span className="badge badge-pending" title={`Follow-up on ${formatDateTime(o.next_follow_up_at)}`}>Waiting</span>
                     ) : (
                       <span className="badge badge-low">Sent</span>
                     )}
                   </td>
-                  <td className="source-cell">{new Date(o.sent_at).toLocaleDateString()}</td>
+                  <td className="source-cell">{formatDateTime(o.sent_at)}</td>
                 </tr>
               ))}
             </tbody>

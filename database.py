@@ -40,6 +40,7 @@ def _run_migrations(client):
         "ALTER TABLE scheduled_sends ADD COLUMN kind TEXT DEFAULT 'test'",
         "ALTER TABLE scheduled_sends ADD COLUMN subject TEXT",
         "ALTER TABLE scheduled_sends ADD COLUMN body TEXT",
+        "ALTER TABLE sent_emails ADD COLUMN is_test INTEGER DEFAULT 0",
     ]
     for sql in migrations:
         try:
@@ -136,6 +137,14 @@ def init_db():
             )""",
             """CREATE INDEX IF NOT EXISTS idx_scheduled_sends_due
                ON scheduled_sends(status, send_at)""",
+            """CREATE TABLE IF NOT EXISTS email_open_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sent_email_id INTEGER NOT NULL,
+                opened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (sent_email_id) REFERENCES sent_emails(id)
+            )""",
+            """CREATE INDEX IF NOT EXISTS idx_email_open_events_email
+               ON email_open_events(sent_email_id)""",
         ])
         _run_migrations(client)
     finally:

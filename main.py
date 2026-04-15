@@ -785,9 +785,8 @@ def bulk_send(body: BulkSendRequest, request: Request):
 
     if first_result["ok"]:
         # Log to sent_emails for follow-up tracking
-        from followup_engine import get_follow_up_days
-        follow_up_days = get_follow_up_days()
-        next_follow_up = (datetime.now(timezone.utc) + timedelta(days=follow_up_days)).isoformat()
+        from followup_engine import compute_next_follow_up_at
+        next_follow_up = compute_next_follow_up_at()
         execute(
             """INSERT INTO sent_emails
                (company_id, to_email, subject, body, sent_by, email_type, gmail_message_id,
@@ -914,12 +913,10 @@ def send_email(body: SendEmailRequest, request: Request):
     message_id_header = result["message_id_header"]
     user_email = get_current_user(request).get("email", "unknown")
 
-    from followup_engine import get_follow_up_days
-    from datetime import datetime, timedelta, timezone
-    follow_up_days = get_follow_up_days()
+    from followup_engine import compute_next_follow_up_at
     next_follow_up = None
     if email_type != "final":
-        next_follow_up = (datetime.now(timezone.utc) + timedelta(days=follow_up_days)).isoformat()
+        next_follow_up = compute_next_follow_up_at()
 
     # Store the subject we ACTUALLY sent (after Re: prefix logic), so replies keep threading.
     stored_subject = f"Re: {anchor['root_subject']}" if anchor and anchor.get("root_subject") else body.subject
@@ -958,7 +955,7 @@ def send_email(body: SendEmailRequest, request: Request):
 
 @app.get("/api/companies/{company_id}/outreach")
 def get_outreach_history(company_id: int):
-    """Get sent email history for a company."""
+    """Get sent email history for a company, with per-open event timeline."""
     rs = execute(
         """SELECT se.id, se.to_email, se.subject, se.sent_by, se.email_type, se.replied,
                   se.sent_at, se.next_follow_up_at, eo.opened_at, eo.open_count
@@ -967,11 +964,75 @@ def get_outreach_history(company_id: int):
            WHERE se.company_id = ? ORDER BY se.sent_at DESC""",
         [company_id],
     )
+    rows = rs.rows
+    if not rows:
+        return []
+
+    # Pull all open events for these sent_email_ids in one query, group by id.
+    email_ids = [r[0] for r in rows]
+    placeholders = ",".join("?" for _ in email_ids)
+    ev_rs = execute(
+        f"""SELECT sent_email_id, opened_at FROM email_open_events
+            WHERE sent_email_id IN ({placeholders})
+            ORDER BY opened_at ASC""",
+        email_ids,
+    )
+    opens_by_id: dict[int, list[str]] = {}
+    for ev in ev_rs.rows:
+        opens_by_id.setdefault(ev[0], []).append(ev[1])
+
     return [{
         "id": r[0], "to_email": r[1], "subject": r[2], "sent_by": r[3],
         "email_type": r[4], "replied": bool(r[5]), "sent_at": r[6],
         "next_follow_up_at": r[7], "opened_at": r[8], "open_count": r[9] or 0,
-    } for r in rs.rows]
+        "opens": opens_by_id.get(r[0], []),
+    } for r in rows]
+
+
+class StopSequenceRequest(BaseModel):
+    contact_email: str
+
+
+@app.post("/api/companies/{company_id}/stop-sequence")
+def stop_sequence(company_id: int, body: StopSequenceRequest, request: Request):
+    """Stop the follow-up sequence for one contact at one company.
+
+    Clears `next_follow_up_at` on their sent_emails rows and cancels any
+    pending rows in scheduled_sends. Does not delete anything — the audit
+    trail stays intact. Already-sent emails are not recalled (obviously).
+    """
+    user = get_current_user(request)
+
+    # Make sure the contact actually has history at this company
+    check_rs = execute(
+        "SELECT COUNT(*) FROM sent_emails WHERE company_id = ? AND to_email = ?",
+        [company_id, body.contact_email],
+    )
+    if not check_rs.rows or check_rs.rows[0][0] == 0:
+        raise HTTPException(status_code=404, detail="No outreach history for this contact")
+
+    # 1. Clear any future follow-up markers
+    execute(
+        """UPDATE sent_emails SET next_follow_up_at = NULL
+           WHERE company_id = ? AND to_email = ? AND next_follow_up_at IS NOT NULL""",
+        [company_id, body.contact_email],
+    )
+
+    # 2. Cancel any scheduled follow-ups that haven't fired yet
+    cancelled_rs = execute(
+        """UPDATE scheduled_sends
+           SET status = 'cancelled', error_message = ?, sent_at = CURRENT_TIMESTAMP
+           WHERE status = 'pending'
+             AND company_id = ?
+             AND contact_email = ?""",
+        [f"stopped by {user['email']}", company_id, body.contact_email],
+    )
+
+    logger.info(
+        "Sequence stopped: company=%d contact=%s by=%s",
+        company_id, body.contact_email, user["email"],
+    )
+    return {"status": "stopped", "contact_email": body.contact_email}
 
 
 # ── Settings ──────────────────────────────────────────────────────────────────
@@ -1133,20 +1194,85 @@ def update_settings(body: SettingsUpdate):
 
 @app.get("/api/activity")
 def get_activity():
-    """Get all outreach activity across all companies."""
+    """Get all outreach activity with per-email open-event timeline."""
     rs = execute(
         """SELECT se.id, se.company_id, c.name as company_name, c.industry,
                   se.to_email, se.subject, se.email_type, se.replied,
-                  se.sent_by, se.sent_at, se.next_follow_up_at
+                  se.sent_by, se.sent_at, se.next_follow_up_at,
+                  eo.opened_at, eo.open_count, COALESCE(se.is_test, 0)
            FROM sent_emails se
            JOIN companies c ON c.id = se.company_id
+           LEFT JOIN email_opens eo ON eo.sent_email_id = se.id
            ORDER BY se.sent_at DESC""",
     )
+    rows = rs.rows
+    if not rows:
+        return []
+
+    email_ids = [r[0] for r in rows]
+    placeholders = ",".join("?" for _ in email_ids)
+    ev_rs = execute(
+        f"""SELECT sent_email_id, opened_at FROM email_open_events
+            WHERE sent_email_id IN ({placeholders})
+            ORDER BY opened_at ASC""",
+        email_ids,
+    )
+    opens_by_id: dict[int, list[str]] = {}
+    for ev in ev_rs.rows:
+        opens_by_id.setdefault(ev[0], []).append(ev[1])
+
     return [{
         "id": r[0], "company_id": r[1], "company_name": r[2], "industry": r[3],
         "to_email": r[4], "subject": r[5], "email_type": r[6], "replied": bool(r[7]),
         "sent_by": r[8], "sent_at": r[9], "next_follow_up_at": r[10],
-    } for r in rs.rows]
+        "opened_at": r[11], "open_count": r[12] or 0,
+        "is_test": bool(r[13]),
+        "opens": opens_by_id.get(r[0], []),
+    } for r in rows]
+
+
+@app.delete("/api/activity/test/{sent_email_id}")
+def delete_test_activity(sent_email_id: int, request: Request):
+    """Delete a test-send record and its related open events.
+
+    Scoped to is_test=1 only so this can't accidentally nuke real outreach.
+    Cascades to email_opens and email_open_events.
+    """
+    get_current_user(request)
+    rs = execute(
+        "SELECT COALESCE(is_test, 0) FROM sent_emails WHERE id = ?",
+        [sent_email_id],
+    )
+    if not rs.rows:
+        raise HTTPException(status_code=404, detail="Not found")
+    if not rs.rows[0][0]:
+        raise HTTPException(status_code=400, detail="Cannot delete a real outreach record here. This endpoint is scoped to test sends.")
+
+    execute("DELETE FROM email_open_events WHERE sent_email_id = ?", [sent_email_id])
+    execute("DELETE FROM email_opens WHERE sent_email_id = ?", [sent_email_id])
+    execute("DELETE FROM sent_emails WHERE id = ?", [sent_email_id])
+    logger.info("Deleted test activity %d", sent_email_id)
+    return {"status": "deleted", "id": sent_email_id}
+
+
+@app.delete("/api/activity/test")
+def delete_all_test_activity(request: Request):
+    """Clear ALL test-send records at once. Useful for cleaning up after runs."""
+    get_current_user(request)
+    cnt_rs = execute("SELECT COUNT(*) FROM sent_emails WHERE is_test = 1")
+    count = cnt_rs.rows[0][0] if cnt_rs.rows else 0
+    if count == 0:
+        return {"status": "deleted", "count": 0}
+
+    # Collect ids so we can cascade cleanly
+    id_rs = execute("SELECT id FROM sent_emails WHERE is_test = 1")
+    ids = [r[0] for r in id_rs.rows]
+    placeholders = ",".join("?" for _ in ids)
+    execute(f"DELETE FROM email_open_events WHERE sent_email_id IN ({placeholders})", ids)
+    execute(f"DELETE FROM email_opens WHERE sent_email_id IN ({placeholders})", ids)
+    execute("DELETE FROM sent_emails WHERE is_test = 1")
+    logger.info("Deleted %d test activity records", count)
+    return {"status": "deleted", "count": count}
 
 
 @app.get("/api/activity/unreached")
@@ -1297,6 +1423,18 @@ def start_test_sequence(req: TestSequenceRequest, request: Request):
     sent_count += 1
     logger.info("Test sequence: sent step 1/%d to %s", seq_length, req.test_email)
 
+    # Log test sends to sent_emails with is_test=1 so they show up in the
+    # Activity Tracker's Test Runs tab (and can be bulk-deleted there).
+    execute(
+        """INSERT INTO sent_emails
+           (company_id, to_email, subject, body, sent_by, email_type, gmail_message_id,
+            thread_id, message_id_header, is_test)
+           VALUES (?, ?, ?, ?, ?, 'initial', ?, ?, ?, 1)""",
+        [req.company_id, req.test_email, step1_subject, req.body, user["email"],
+         step1_result["gmail_message_id"], step1_result["thread_id"],
+         step1_result["message_id_header"]],
+    )
+
     anchor_message_id = step1_result["message_id_header"]
     anchor_thread_id = step1_result["thread_id"]
 
@@ -1333,6 +1471,15 @@ def start_test_sequence(req: TestSequenceRequest, request: Request):
             if step_result["ok"]:
                 sent_count += 1
                 logger.info("Test sequence: sent step %d/%d to %s", step, seq_length, req.test_email)
+                execute(
+                    """INSERT INTO sent_emails
+                       (company_id, to_email, subject, body, sent_by, email_type, gmail_message_id,
+                        thread_id, message_id_header, is_test)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+                    [req.company_id, req.test_email, step_subject, draft["body"],
+                     user["email"], email_type, step_result["gmail_message_id"],
+                     step_result["thread_id"], step_result["message_id_header"]],
+                )
             else:
                 errors.append(f"step {step}: {step_result['error']}")
         except Exception as e:
@@ -1439,11 +1586,18 @@ def track_email_open(tracking_id: str):
     if not check_rate_limit(f"track:{tracking_id}", 10, 3600):
         pass  # Still return the pixel, just don't update DB
     else:
-        rs = execute("SELECT sent_email_id, open_count FROM email_opens WHERE tracking_id = ?", [tracking_id])
+        rs = execute("SELECT sent_email_id FROM email_opens WHERE tracking_id = ?", [tracking_id])
         if rs.rows:
+            sent_email_id = rs.rows[0][0]
+            # Update summary (first-open timestamp + running count)
             execute(
-                "UPDATE email_opens SET opened_at = CURRENT_TIMESTAMP, open_count = open_count + 1 WHERE tracking_id = ?",
+                "UPDATE email_opens SET opened_at = COALESCE(opened_at, CURRENT_TIMESTAMP), open_count = open_count + 1 WHERE tracking_id = ?",
                 [tracking_id],
+            )
+            # Log this individual open event for per-open timeline in the UI
+            execute(
+                "INSERT INTO email_open_events (sent_email_id) VALUES (?)",
+                [sent_email_id],
             )
 
     # Return a 1x1 transparent GIF
@@ -1703,8 +1857,8 @@ def run_scheduled_sends(request: Request):
                 if email_type != "final":
                     current_idx = sequence.index(email_type) if email_type in sequence else 0
                     if current_idx + 1 < len(sequence):
-                        next_follow_up = (datetime.now(timezone.utc)
-                                          + timedelta(days=get_follow_up_days())).isoformat()
+                        from followup_engine import compute_next_follow_up_at
+                        next_follow_up = compute_next_follow_up_at()
 
                 stored_subject = (f"Re: {anchor['root_subject']}"
                                   if anchor and anchor.get("root_subject")
@@ -1743,10 +1897,8 @@ def run_scheduled_sends(request: Request):
 
                 if result["ok"]:
                     # Log to sent_emails for follow-up tracking (initial email)
-                    from followup_engine import get_follow_up_days
-                    from datetime import timedelta
-                    follow_up_days = get_follow_up_days()
-                    next_follow_up = (datetime.now(timezone.utc) + timedelta(days=follow_up_days)).isoformat()
+                    from followup_engine import compute_next_follow_up_at
+                    next_follow_up = compute_next_follow_up_at()
                     execute(
                         """INSERT INTO sent_emails
                            (company_id, to_email, subject, body, sent_by, email_type, gmail_message_id,

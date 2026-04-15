@@ -26,6 +26,21 @@ const TAGLINES = [
 ];
 const TAGLINE = TAGLINES[Math.floor(Math.random() * TAGLINES.length)];
 
+const VALID_VIEWS = new Set(["list", "add", "settings", "activity", "boobbus-info", "detail"]);
+
+function parsePathToState(pathname) {
+  // "/" → list, "/settings" → settings, "/detail/42" → detail + id=42
+  const stripped = pathname.replace(/^\/+|\/+$/g, "");
+  if (!stripped) return { view: "list", companyId: null };
+  const [first, second] = stripped.split("/");
+  if (!VALID_VIEWS.has(first)) return { view: "list", companyId: null };
+  if (first === "detail") {
+    const id = parseInt(second, 10);
+    return { view: "detail", companyId: Number.isFinite(id) ? id : null };
+  }
+  return { view: first, companyId: null };
+}
+
 function LoginPage() {
   const { gsiReady, renderGoogleButton } = useAuth();
   const btnRef = useRef(null);
@@ -66,8 +81,11 @@ function LoginPage() {
 
 function App() {
   const { user, loading, logout } = useAuth();
-  const [selectedCompanyId, setSelectedCompanyId] = useState(null);
-  const [view, setView] = useState("list");
+  // Initialize view/companyId from the current URL so refreshing on /activity,
+  // /settings, etc. lands on the right screen instead of snapping back to list.
+  const initial = parsePathToState(window.location.pathname);
+  const [selectedCompanyId, setSelectedCompanyId] = useState(initial.companyId);
+  const [view, setView] = useState(initial.view);
 
   const navigate = useCallback((newView, companyId = null) => {
     setView(newView);
@@ -93,8 +111,14 @@ function App() {
       }
     };
     window.addEventListener("popstate", handlePop);
-    // Set initial state
-    window.history.replaceState({ view: "list", companyId: null }, "", "/");
+    // Seed history state for the CURRENT path so back/forward works correctly
+    // without rewriting the URL to "/" (that used to throw away refresh context).
+    const current = parsePathToState(window.location.pathname);
+    window.history.replaceState(
+      { view: current.view, companyId: current.companyId },
+      "",
+      window.location.pathname + window.location.search,
+    );
     return () => window.removeEventListener("popstate", handlePop);
   }, []);
 

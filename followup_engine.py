@@ -3,6 +3,34 @@
 import os
 import logging
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+# All Boob Bus operations are Mountain Time. Follow-up eligibility is computed
+# in this timezone so "+1 day" means "tomorrow in the user's local calendar,"
+# not "24 hours later on the clock."
+ORG_TZ = ZoneInfo("America/Denver")
+
+
+def compute_next_follow_up_at(base_utc: datetime | None = None, follow_up_days: int | None = None) -> str:
+    """Return the ISO UTC timestamp when the next follow-up is eligible.
+
+    Uses start-of-Mountain-day math so follow_up_days=1 always means
+    "tomorrow morning" regardless of what time of day the base email was sent.
+    The daily follow-up cron runs at 17:00 UTC (11 AM MDT / 10 AM MST), which
+    is always AFTER the 00:00 Mountain eligibility, so sends land that day.
+    """
+    if base_utc is None:
+        base_utc = datetime.now(timezone.utc)
+    if follow_up_days is None:
+        follow_up_days = get_follow_up_days()
+
+    base_mt = base_utc.astimezone(ORG_TZ)
+    target_date = base_mt.date() + timedelta(days=follow_up_days)
+    eligibility_mt = datetime(
+        target_date.year, target_date.month, target_date.day,
+        tzinfo=ORG_TZ,
+    )
+    return eligibility_mt.astimezone(timezone.utc).isoformat()
 
 import requests as http_requests
 

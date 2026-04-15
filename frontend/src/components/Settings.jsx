@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { fetchSettings, updateSettings, gmailAuthorize, gmailStatus, gmailDisconnect, fetchOrgGmailOptions } from "../api";
+import { formatDateTime } from "../utils/formatDate";
 import "./Settings.css";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
@@ -23,7 +24,7 @@ export default function Settings({ onBack }) {
   useEffect(() => {
     fetchSettings().then(setSettings);
     gmailStatus().then(setGmail);
-    fetchOrgGmailOptions().then(setOrgGmailOptions);
+    fetchOrgGmailOptions().then((opts) => setOrgGmailOptions(Array.isArray(opts) ? opts : []));
   }, []);
 
   const update = (key, value) => setSettings((s) => ({ ...s, [key]: value }));
@@ -291,7 +292,7 @@ export default function Settings({ onBack }) {
               <strong>Connected:</strong> {gmail.email}
               <br/>
               <span className="settings-hint">
-                Auto follow-ups are active. Last updated: {new Date(gmail.updated_at).toLocaleString()}
+                Auto follow-ups are active. Last updated: {formatDateTime(gmail.updated_at)}
               </span>
             </div>
             <button

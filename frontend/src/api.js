@@ -152,6 +152,37 @@ export async function fetchOutreachHistory(companyId) {
   return res.json();
 }
 
+export async function deleteTestActivity(sentEmailId) {
+  const res = await authFetch(`${API}/api/activity/test/${sentEmailId}`, { method: "DELETE" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to delete");
+  }
+  return res.json();
+}
+
+export async function deleteAllTestActivity() {
+  const res = await authFetch(`${API}/api/activity/test`, { method: "DELETE" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to clear tests");
+  }
+  return res.json();
+}
+
+export async function stopSequence(companyId, contactEmail) {
+  const res = await authFetch(`${API}/api/companies/${companyId}/stop-sequence`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contact_email: contactEmail }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to stop sequence");
+  }
+  return res.json();
+}
+
 export async function updateCompany(companyId, data) {
   const res = await authFetch(`${API}/api/companies/${companyId}`, {
     method: "PUT",
@@ -246,8 +277,14 @@ export async function fetchEmailModels() {
 }
 
 export async function fetchOrgGmailOptions() {
-  const res = await authFetch(`${API}/api/org-gmail/options`);
-  return res.json();
+  try {
+    const res = await authFetch(`${API}/api/org-gmail/options`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function updateSettings(data) {

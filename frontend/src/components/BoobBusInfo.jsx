@@ -34,19 +34,30 @@ export default function BoobBusInfo({ onBack }) {
   const [modelSaving, setModelSaving] = useState(false);
 
   useEffect(() => {
-    Promise.all([
+    // allSettled: a single 404 (e.g. backend not restarted yet) shouldn't
+    // blank the whole page. Each field falls back independently.
+    Promise.allSettled([
       fetch(`${API}/api/boobbus-info`, { headers: authHeaders() }).then((r) => r.json()),
       fetch(`${API}/api/prompts`, { headers: authHeaders() }).then((r) => r.json()),
       fetchSettings(),
       fetchEmailModels(),
-    ]).then(([infoData, promptData, settingsData, models]) => {
-      setInfo(infoData.info);
-      setCustomerFeedback(infoData.customer_feedback || "");
-      setPrompts(promptData.prompts);
-      setDefaults(promptData.defaults);
-      setSequenceLength(settingsData.sequence_length);
-      setEmailModel(settingsData.email_model || "");
-      setModelOptions(models);
+    ]).then((results) => {
+      const [infoRes, promptRes, settingsRes, modelsRes] = results;
+      if (infoRes.status === "fulfilled" && infoRes.value) {
+        setInfo(infoRes.value.info || "");
+        setCustomerFeedback(infoRes.value.customer_feedback || "");
+      }
+      if (promptRes.status === "fulfilled" && promptRes.value) {
+        setPrompts(promptRes.value.prompts || {});
+        setDefaults(promptRes.value.defaults || {});
+      }
+      if (settingsRes.status === "fulfilled" && settingsRes.value) {
+        setSequenceLength(settingsRes.value.sequence_length || 3);
+        setEmailModel(settingsRes.value.email_model || "");
+      }
+      if (modelsRes.status === "fulfilled") {
+        setModelOptions(Array.isArray(modelsRes.value) ? modelsRes.value : []);
+      }
       setLoading(false);
     });
   }, []);
@@ -188,7 +199,12 @@ export default function BoobBusInfo({ onBack }) {
                   <div className="model-option-header">
                     <span className="model-option-name">{m.name}</span>
                     <span className="model-option-tier">{m.tier}</span>
-                    <span className="model-option-cost">~${m.cost_per_email.toFixed(3)} / email</span>
+                    <span className="model-option-cost">
+                      ~${(m.cost_per_email * sequenceLength).toFixed(2)} / prospect
+                      <span className="model-option-cost-detail">
+                        ({sequenceLength} × ${m.cost_per_email.toFixed(3)})
+                      </span>
+                    </span>
                   </div>
                   <p className="model-option-desc">{m.description}</p>
                 </div>
@@ -197,8 +213,9 @@ export default function BoobBusInfo({ onBack }) {
           })}
         </div>
         <p className="info-desc" style={{ fontSize: 12, marginTop: 8 }}>
-          Cost estimates assume ~1,800 input tokens + ~500 output tokens per email. Actual cost
-          varies with prompt size and email length.
+          Cost per prospect assumes a full {sequenceLength}-email sequence (initial + follow-ups + final)
+          at ~1,800 input tokens + ~500 output tokens each. Actual cost varies with prompt size and
+          email length. If a prospect replies partway through, the remaining sequence is skipped.
         </p>
       </div>
 
